@@ -159,6 +159,23 @@ defineExpose({ openDrawer })
         管理知识库文档
       </el-button>
     </div>
+
+    <!-- Agent 模式 -->
+    <div class="setting-item">
+      <div class="for-inline">
+        <div class="name-label">
+          <span>Agent 模式 (MCP)</span>
+          <el-tooltip content="开启后 AI 可自动调用工具（查时间、检索知识库等），开启时 RAG 开关无效" placement="top">
+            <el-icon><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </div>
+        <el-switch v-model="settingStore.settings.agentEnabled" />
+      </div>
+      <div v-if="settingStore.settings.agentEnabled" class="agent-tools-tip">
+        <div>可用工具：获取当前时间、知识库检索</div>
+        <div style="margin-top:4px;color:#e6a23c;">⚠️ 请选择支持工具调用的模型，如 DeepSeek-V3、Qwen3 系列（标注「工具调用」的选项）</div>
+      </div>
+    </div>
   </el-drawer>
 
   <RagPanel ref="ragPanelRef" />
@@ -181,5 +198,13 @@ defineExpose({ openDrawer })
     color: #3f7af1;
     text-decoration: none//a标签:各种线；没有
   }
+}
+.agent-tools-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  background: #f5f7fa;
+  padding: 6px 10px;
+  border-radius: 4px;
 }
 </style>

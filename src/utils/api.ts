@@ -1,5 +1,6 @@
 //网络请求
-import { useSettingStore } from "@/stores/settings.ts";
+import { useSettingStore } from "@/stores/settings.ts"
+
 
 // 多模态内容块（图片或文本）
 interface ContentPart {
@@ -63,5 +64,26 @@ export const createChatCompletion = async (messages:sendMessage[]) => {
         console.error('Chat API Error:',error)
         throw error
     }
+}
 
+// Agent 模式：调用 /api/agent，返回 SSE Response 对象供 handleAgentStream 消费
+export const createAgentCompletion = async (messages: sendMessage[]) => {
+    const settingStore = useSettingStore()
+    const payload = {
+        model: settingStore.settings.model,
+        messages,
+        max_tokens: settingStore.settings.maxTokens,
+        temperature: settingStore.settings.temperature,
+        top_p: settingStore.settings.topP,
+        top_k: settingStore.settings.topK,
+    }
+    const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+        throw new Error('Agent API error: ' + response.status)
+    }
+    return response
 }

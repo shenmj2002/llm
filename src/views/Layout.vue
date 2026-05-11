@@ -6,7 +6,7 @@ import SettingsPanel from "@/components/SettingsPanel.vue"
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useChatStore } from "@/stores/chat.ts"
 import { messageHandle } from "@/utils/messageHandle.ts"
-import { createChatCompletion } from "@/utils/api.ts"
+import { createChatCompletion, createAgentCompletion } from "@/utils/api.ts"
 import { useSettingStore } from "@/stores/settings"
 import type { Ref } from 'vue';
 
@@ -73,6 +73,7 @@ async function buildApiContent(text: string, files: File[]) {
     return parts
 }
 
+// 工具调用状态（在助手消息气泡上方展示）
 //发送消息
 const handleSend = async (messageContent: { text: string; files: any[]; rawFiles: File[] }) => {
     try {
@@ -96,19 +97,33 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
         const currentContent = await buildApiContent(messageContent.text, messageContent.rawFiles)
         const sendMessages = [...history, { role: 'user' as const, content: currentContent }]
 
-        const response = await createChatCompletion(sendMessages)
-        await messageHandle.handleResponse(
-            response,
-            settingStore.settings.stream,
-            (content: string, reasoning_content: string, completion_tokens: string, speed: string) => {
-                chatStore.updateLastMessage(content, reasoning_content, completion_tokens, speed)
-            }
-        )
+        if (settingStore.settings.agentEnabled) {
+            // Agent 模式：走 /api/agent，支持 MCP 工具调用
+            const response = await createAgentCompletion(sendMessages)
+            await messageHandle.handleAgentStream(
+                response,
+                (content: string, reasoning: string, tokens: string, speed: string) => {
+                    chatStore.updateLastMessage(content, reasoning, tokens, speed)
+                },
+                () => {}
+            )
+        } else {
+            // 普通模式：走 /api/chat
+            const response = await createChatCompletion(sendMessages)
+            await messageHandle.handleResponse(
+                response,
+                settingStore.settings.stream,
+                (content: string, reasoning_content: string, completion_tokens: string, speed: string) => {
+                    chatStore.updateLastMessage(content, reasoning_content, completion_tokens, speed)
+                }
+            )
+        }
     } catch (error) {
         console.log('Failed to send message:', error)
         chatStore.updateLastMessage('抱歉，发生了一些错误，请稍后重试。', " ", " ", " ")
     } finally {
         chatStore.setIsLoading(false)
+        // toolStatus 由 toolCallback 里的 setTimeout 负责清除，这里不提前清空
     }
 }
 
@@ -353,6 +368,5 @@ onMounted(() => {
     width: 100%;
     max-width: 796px;
     margin: 0 auto;
-
 }
 </style>

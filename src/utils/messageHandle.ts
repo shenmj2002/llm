@@ -87,7 +87,59 @@ export const messageHandle = {
         else {
             this.handleNormalResponse(response, updateCallback)
         }
-    }
+    },
 
+    // 处理 Agent 模式的 SSE 事件流
+    // updateCallback: (content, reasoning, tokens, speed) => void  — 更新消息内容
+    // toolCallback: (event: 'start'|'done', name, extra) => void  — 更新工具调用状态
+    async handleAgentStream(
+        response: Response,
+        updateCallback: Function,
+        toolCallback: Function,
+    ) {
+        const reader = response.body?.getReader()
+        if (!reader) return
+        const decoder = new TextDecoder()
+        let accContent = ''
+        let accReasoning = ''
+        let totalTokens = 0
+        const startTime = Date.now()
 
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value)
+            for (const line of chunk.split('\n')) {
+                if (!line.startsWith('data:')) continue
+                try {
+                    const event = JSON.parse(line.slice(5))
+                    switch (event.type) {
+                        case 'tool_start':
+                            toolCallback('start', event.name, event.args)
+                            break
+                        case 'tool_done':
+                            toolCallback('done', event.name, event.result)
+                            break
+                        case 'token':
+                            accContent += event.content || ''
+                            accReasoning += event.reasoning || ''
+                            if (event.usage?.completion_tokens) {
+                                totalTokens = event.usage.completion_tokens
+                            }
+                            updateCallback(
+                                accContent,
+                                accReasoning,
+                                totalTokens,
+                                (totalTokens / ((Date.now() - startTime) / 1000)).toFixed(2),
+                            )
+                            break
+                        case 'error':
+                            throw new Error(event.message || 'Agent error')
+                    }
+                } catch (e: any) {
+                    if (e.message?.includes('Agent error')) throw e
+                }
+            }
+        }
+    },
 }
