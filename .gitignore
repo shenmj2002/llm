@@ -1,0 +1,4 @@
+node_modules
+.env
+server/chroma-data/
+server/rag-docs.json

@@ -25,39 +25,90 @@ const settingDrawer = ref<InstanceType<typeof SettingsPanel> | null>(null);
 const openSettings = () => settingDrawer.value?.openDrawer();
 
 
+// 把 图片 读成 base64 Data URL
+function readAsDataURL(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+    })
+}
+
+// 把文本文件读成字符串
+function readAsText(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsText(file, 'utf-8')
+    })
+}
+
+// 根据文件列表构建发送给 API 的消息 content
+// 图片 → 多模态数组，文本文件 → 注入到文字消息里
+async function buildApiContent(text: string, files: File[]) {
+    if (files.length === 0) return text
+
+    const images = files.filter(f => f.type.startsWith('image/'))
+    const textFiles = files.filter(f => !f.type.startsWith('image/'))
+
+    // 文本文件内容拼接到消息前面
+    let fullText = text
+    for (const file of textFiles) {
+        const content = await readAsText(file)
+        fullText = `文件内容（${file.name}）：\n\`\`\`\n${content}\n\`\`\`\n\n${fullText}`
+    }
+
+    // 没有图片时直接返回字符串
+    if (images.length === 0) return fullText
+
+    // 有图片：构建多模态内容数组（OpenAI Vision 格式）
+    const parts: any[] = []
+    for (const img of images) {
+        const base64 = await readAsDataURL(img)
+        parts.push({ type: 'image_url', image_url: { url: base64 } })
+    }
+    parts.push({ type: 'text', text: fullText })
+    return parts
+}
+
 //发送消息
-const handleSend = async (messageContent: { text: string; files: File[] }) => {
+const handleSend = async (messageContent: { text: string; files: any[]; rawFiles: File[] }) => {
     try {
-        // 添加用户消息
+        // 添加用户消息到 store（展示用，保留 blob URL 用于气泡中预览）
         chatStore.addMessage(
             messageHandle.formatMessage("user", messageContent.text, " ", messageContent.files)
         )
-        
-        //修改侧边栏名称
         chatStore.updateTitleFromMessage(messageContent.text)
-        // 添加空的助手消息
+        // 添加空的助手消息占位
         chatStore.addMessage(
             messageHandle.formatMessage("assistant", "", "", [])
         )
-        // 设置loading状态
         chatStore.setIsLoading(true)
 
-        // 调用API获取回复
-        const sendmessages = chatStore.currentMessages.map(({ role, content }) => ({ role, content }))
-        const response = await createChatCompletion(sendmessages)
-        // 使用封装的响应处理函数
+        // 取历史消息（去掉刚加的空 assistant）作为上下文
+        const history = chatStore.currentMessages
+            .slice(0, -2)
+            .map(({ role, content }) => ({ role, content }))
+
+        // 处理当前用户消息的文件，构建多模态 content
+        const currentContent = await buildApiContent(messageContent.text, messageContent.rawFiles)
+        const sendMessages = [...history, { role: 'user' as const, content: currentContent }]
+
+        const response = await createChatCompletion(sendMessages)
         await messageHandle.handleResponse(
             response,
             settingStore.settings.stream,
-            (content: string, reasoning_content: string, completion_tokens: string, speed: string) => { chatStore.updateLastMessage(content, reasoning_content, completion_tokens, speed) }
+            (content: string, reasoning_content: string, completion_tokens: string, speed: string) => {
+                chatStore.updateLastMessage(content, reasoning_content, completion_tokens, speed)
+            }
         )
     } catch (error) {
-        console.log('Failed to send message:', error);
+        console.log('Failed to send message:', error)
         chatStore.updateLastMessage('抱歉，发生了一些错误，请稍后重试。', " ", " ", " ")
     } finally {
-        // 重置loading状态
         chatStore.setIsLoading(false)
-
     }
 }
 

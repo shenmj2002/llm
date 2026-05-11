@@ -10,52 +10,52 @@ interface FileItem {
     type: 'image' | 'file'; // 文件类型
     size: number;      // 文件大小（字节）
 }
-const fileList: Ref<FileItem[]> = ref([]) // 存储上传的文件列表,类型是由FileItem组成的数组
-const inputValue = ref('')//输入框的值，使用 ref 实现响应式
+const fileList: Ref<FileItem[]> = ref([]) // 展示用的文件列表（含 blob URL）
+const rawFiles: Ref<File[]> = ref([])     // 原始 File 对象，与 fileList 下标一一对应
+const inputValue = ref('')
 
-//将文件上传移到fileList，uploadFile：文件状态发生变化得到的参数
-//uploadFile类型为一个对象，里面必须有raw这个属性，这个属性的值是file对象
-const handleFileUpload = (uploadFile: { raw: File }) => {
-    // 获取原始文件对象
-    const file = uploadFile.raw
-    //如果文件不存在则终止操作
-    if (!file) return false
-    //将文件信息从后面添加到 fileList 中
-    fileList.value.push({
-        name: file.name,
-        url: URL.createObjectURL(file),//创建临时内存URL，伪协议地址
-        type: file.type.startsWith('image/') ? 'image' : 'file',//类型为image或file
-        size: file.size,
+// 图片转 base64 data URL，刷新后仍可显示；非图片文件用 blob URL 即可
+function toDataURL(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
     })
-    // 阻止组件自动上传文件，el-upload组件会自动上传
-    return false 
 }
 
-//删除文件 
-const handleFileRemove = (file: { url: string }) => {//file是一个具有url属性的对象
-    //查找文件下标，没有找到就返回-1
-    const index = fileList.value.findIndex((item) => item.url === file.url )
+// 处理文件上传
+const handleFileUpload = async (uploadFile: { raw: File }) => {
+    const file = uploadFile.raw
+    if (!file) return false
+    const isImage = file.type.startsWith('image/')
+    const url = isImage ? await toDataURL(file) : URL.createObjectURL(file)
+    fileList.value.push({ name: file.name, url, type: isImage ? 'image' : 'file', size: file.size })
+    rawFiles.value.push(file)
+    return false
+}
+
+//删除文件
+const handleFileRemove = (file: { url: string }) => {
+    const index = fileList.value.findIndex((item) => item.url === file.url)
     if (index !== -1) {
-        URL.revokeObjectURL(fileList.value[index].url)//释放内存
-        fileList.value.splice(index, 1)//从数组中删除
+        URL.revokeObjectURL(fileList.value[index].url)
+        fileList.value.splice(index, 1)
+        rawFiles.value.splice(index, 1) // 同步删除原始 File 对象
     }
 }
 
-//发送消息
-// 自定义事件组件交互，子组件数据传到父组件，声明事件send
 const emit = defineEmits(["send"])
 const sendMessage = () => {
-    //如果输入框为空或处于加载状态，则return
-    if( !inputValue.value.trim() || props.loading) return
-    // 构建消息对象
+    if (!inputValue.value.trim() || props.loading) return
     const messageContent = {
         text: inputValue.value.trim(),
-        files:fileList.value
+        files: fileList.value,
+        rawFiles: rawFiles.value, // 传递原始 File 对象供父组件处理
     }
-    // 自定义事件组件交互,触发 send 事件，将消息内容作为参数传递
-    emit("send",messageContent)
-    // 清空输入框和文件列表
+    emit("send", messageContent)
     fileList.value = []
+    rawFiles.value = []
     inputValue.value = ""
 }
 

@@ -12,7 +12,8 @@ export const useSettingStore = defineStore('llm-setting',
     maxTokens: 4096, 
     temperature: 0.7, 
     topP: 0.7, 
-    topK: 50, 
+    topK: 50,
+    ragEnabled: false,
   })
 
   return { settings }// 暴露状态供组件使用
@@ -59,6 +60,26 @@ export const modelOptions = [
     label: 'glm-4-9b-chat(Pro)',
     value: 'Pro/THUDM/glm-4-9b-chat',
     maxTokens: 4096,
+  },
+  {
+    label: 'Qwen3-VL-32B (视觉)',
+    value: 'Qwen/Qwen3-VL-32B-Instruct',
+    maxTokens: 8192,
+  },
+  {
+    label: 'Qwen3-VL-32B-Thinking (视觉·推理)',
+    value: 'Qwen/Qwen3-VL-32B-Thinking',
+    maxTokens: 8192,
+  },
+  {
+    label: 'Qwen3-VL-8B (视觉·快)',
+    value: 'Qwen/Qwen3-VL-8B-Instruct',
+    maxTokens: 8192,
+  },
+  {
+    label: 'Qwen3-VL-8B-Thinking (视觉·推理·快)',
+    value: 'Qwen/Qwen3-VL-8B-Thinking',
+    maxTokens: 8192,
   },
 ]
 

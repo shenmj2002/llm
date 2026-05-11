@@ -1,40 +1,35 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
-//导出设置仓库
+import RagPanel from '@/components/RagPanel.vue'
 import { useSettingStore, modelOptions } from "@/stores/settings"
 
-//定义仓库settingStore
 const settingStore = useSettingStore()
 
-//定义抽屉拉开函数
 const drawer = ref(false)
 const openDrawer = () => {
   drawer.value = true
 }
 
-//定义Max Tokens最大值
 const currentMaxTokens = computed(()=>{
-  //currentModel即为符合条件的option
   const currentModel = modelOptions.find((option)=>option.value===settingStore.settings.model)
-  //如果currentModel存在，则返回currentModel.maxTokens，不然返回4096
   return currentModel ? currentModel.maxTokens : 4096
 })
 
-//模型更新后修正Max Tokens
 watch(
   ()=>settingStore.settings.model,
   (newModel)=>{
-    const currentModel =  modelOptions.find((option)=>option.value===newModel)
+    const currentModel = modelOptions.find((option)=>option.value===newModel)
     if(currentModel){
-    settingStore.settings.maxTokens=Math.min(currentModel.maxTokens,settingStore.settings.maxTokens)
-  }})
+      settingStore.settings.maxTokens=Math.min(currentModel.maxTokens,settingStore.settings.maxTokens)
+    }
+  }
+)
 
+const ragPanelRef = ref<InstanceType<typeof RagPanel> | null>(null)
+const openRagPanel = () => ragPanelRef.value?.openDrawer()
 
-// 显式暴露：导出方法供父组件调用
-defineExpose({
-  openDrawer,
-})
+defineExpose({ openDrawer })
 </script>
 
 <template>
@@ -144,7 +139,29 @@ defineExpose({
         <el-slider v-model="settingStore.settings.topK" show-input :min="1" :max="100" :step="1" :show-tooltip="false" />
       </div>
     </div>
+
+    <!-- RAG 知识库 -->
+    <div class="setting-item">
+      <div class="for-inline">
+        <div class="name-label">
+          <span>知识库 (RAG)</span>
+          <el-tooltip content="开启后，回答时自动检索已上传文档" placement="top">
+            <el-icon><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </div>
+        <el-switch v-model="settingStore.settings.ragEnabled" />
+      </div>
+      <el-button
+        size="small"
+        style="margin-top: 10px; width: 100%"
+        @click="openRagPanel"
+      >
+        管理知识库文档
+      </el-button>
+    </div>
   </el-drawer>
+
+  <RagPanel ref="ragPanelRef" />
 </template>
 
 <style scoped lang="scss">
