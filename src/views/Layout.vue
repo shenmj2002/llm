@@ -8,7 +8,6 @@ import { useChatStore } from "@/stores/chat.ts"
 import { messageHandle } from "@/utils/messageHandle.ts"
 import { createChatCompletion, createAgentCompletion } from "@/utils/api.ts"
 import { useSettingStore } from "@/stores/settings"
-import type { Ref } from 'vue';
 
 
 //定义仓库chatStore
@@ -128,31 +127,40 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
 }
 
 
-// 定义消息容器。后面会ref
-const messagesContainer: Ref<HTMLElement | null> = ref(null)
-// 监听消息变化，滚动到底部
-watch(
-    currentMessages,
-    () => {
-        //nextTick:确保元素渲染完成再实行操作
-        nextTick(() => {
-            if (messagesContainer.value) {
-                //元素滚动条当前位置=元素高度，即最底部
-                messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-            }
-        })
-    },
-    { deep: true },//深度监听，修改数组内部内容也会触发
+// 虚拟列表触发阈值：已定稿消息数量达到此数字才启用虚拟滚动
+const VIRTUAL_THRESHOLD = 3
+
+// 仅当消息数量 >= 阈值 且 当前不在流式输出时启用虚拟列表
+const useVirtualScroll = computed(
+    () => currentMessages.value.length >= VIRTUAL_THRESHOLD && !isLoading.value
 )
 
-onMounted(() => {
-    // 每次页面刷新时，将消息容器滚动到底部
+// 普通模式的滚动容器
+const listContainer = ref<HTMLElement | null>(null)
+// 虚拟列表实例
+const scrollerRef = ref<any>(null)
+
+function scrollToBottom() {
     nextTick(() => {
-        if (messagesContainer.value) {
-            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+        if (useVirtualScroll.value) {
+            scrollerRef.value?.scrollToBottom()
+        } else if (listContainer.value) {
+            listContainer.value.scrollTop = listContainer.value.scrollHeight
         }
     })
-    // 当没有对话时，默认新建一个对话
+}
+
+// 监听消息变化，滚动到底部
+watch(currentMessages, scrollToBottom, { deep: true })
+
+// 流式输出结束时（isLoading: true → false），可能发生 v-for → DynamicScroller 切换
+// 新组件默认从顶部开始，需要重新滚到底部
+watch(isLoading, (loading) => {
+    if (!loading) scrollToBottom()
+})
+
+onMounted(() => {
+    scrollToBottom()
     if (chatStore.conversations.length === 0) {
         chatStore.createConversation()
     }
@@ -191,14 +199,9 @@ onMounted(() => {
                     </div>
                 </div>
             </div>
-            <!-- 消息容器，显示对话消息 -->
-            <div class="messages-container" ref="messagesContainer">
-                <!-- 有对话时的界面 -->
-                <template class="chat-message" v-if="currentMessages.length > 0">
-                    <ChatMessage v-for="message in currentMessages" :key="message.id" :message="message" />
-                </template>
-                <!-- 没有对话时的界面 -->
-                <div v-else class="chat-message-begin">
+            <!-- 路径 1：无消息 → 欢迎页 -->
+            <div v-if="currentMessages.length === 0" class="messages-container chat-message-begin-wrapper">
+                <div class="chat-message-begin">
                     <div class="greet">
                         <p><span>你好</span></p>
                         <p>让我们开始对话吧！</p>
@@ -222,6 +225,32 @@ onMounted(() => {
                     </div>
                 </div>
             </div>
+
+            <!-- 路径 2：有消息，普通渲染（消息数 < 阈值 或 正在流式输出） -->
+            <div v-else-if="!useVirtualScroll" class="messages-container" ref="listContainer">
+                <ChatMessage v-for="msg in currentMessages" :key="msg.id" :message="msg" />
+            </div>
+
+            <!-- 路径 3：有消息，数量达到阈值且不在流式输出 → 虚拟列表 -->
+            <DynamicScroller
+                v-else
+                ref="scrollerRef"
+                :items="currentMessages"
+                :min-item-size="80"
+                key-field="id"
+                class="messages-container"
+                style="padding: 0.6rem"
+            >
+                <template #default="{ item, active }">
+                    <DynamicScrollerItem
+                        :item="item"
+                        :active="active"
+                        :size-dependencies="[item.content, item.reasoning_content]"
+                    >
+                        <ChatMessage :message="item" />
+                    </DynamicScrollerItem>
+                </template>
+            </DynamicScroller>
             <!-- 聊天输入框 -->
             <div class="chat-input-container">
                 <!--:loading:props父组件传递到子组件ChatInput    -->
@@ -287,12 +316,17 @@ onMounted(() => {
         }
 
         .messages-container {
-            overflow-y: auto; //垂直方向可滚动
-            padding: 0.6rem;
             flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0.6rem;
             max-width: 900px;
-            margin: 0 auto;//水平居中
+            margin: 0 auto;
             width: 100%;
+        }
+
+        // 欢迎页容器额外样式
+        .chat-message-begin-wrapper {
 
             .chat-message-begin {
 
