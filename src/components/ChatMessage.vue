@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Document, Loading, Sunny, ArrowDown } from '@element-plus/icons-vue'
-import { computed, ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onUnmounted, onMounted } from "vue";
 import { rederMarkdown } from "@/utils/markdown";
 import copyIcon from '@/assets/photo/复制.png'
 
@@ -19,15 +19,52 @@ const toggleReasoning = () => {
     isReasoningExpanded.value = !isReasoningExpanded.value
 }
 
-//将消息内容转换为 HTML
-const renderedContent = computed(() => {
-    return rederMarkdown(props.message.content)
-})
+// 用 ref 手动存储渲染结果，配合防抖实现 chunk 合并渲染
+const renderedContent = ref('')
+const renderedReasoning = ref('')
 
-//将深度思考内容转换为 HTML
-const renderedReasoning = computed(() => {
-    if (!props.message.reasoning_content) return ''
-    return rederMarkdown(props.message.reasoning_content)
+let contentTimer: ReturnType<typeof setTimeout> | null = null
+let reasoningTimer: ReturnType<typeof setTimeout> | null = null
+
+// content：流式时 80ms 内多次更新只渲染最新值（合并 chunk）
+// 消息加载完成（loading=false）时立刻强制渲染一次保证最终内容完整
+watch(
+    () => [props.message.content, props.message.loading] as const,
+    ([content, loading]) => {
+        if (contentTimer) clearTimeout(contentTimer)
+        if (!loading) {
+            // 已结束：立刻渲染最终结果
+            renderedContent.value = rederMarkdown(content || '')
+        } else {
+            // 流式中：80ms 防抖，合并快速到来的 chunk
+            contentTimer = setTimeout(() => {
+                renderedContent.value = rederMarkdown(content || '')
+            }, 80)
+        }
+    },
+    { immediate: true }
+)
+
+// reasoning 同理
+watch(
+    () => [props.message.reasoning_content, props.message.loading] as const,
+    ([reasoning, loading]) => {
+        if (!reasoning) { renderedReasoning.value = ''; return }
+        if (reasoningTimer) clearTimeout(reasoningTimer)
+        if (!loading) {
+            renderedReasoning.value = rederMarkdown(reasoning)
+        } else {
+            reasoningTimer = setTimeout(() => {
+                renderedReasoning.value = rederMarkdown(reasoning)
+            }, 80)
+        }
+    },
+    { immediate: true }
+)
+
+onUnmounted(() => {
+    if (contentTimer) clearTimeout(contentTimer)
+    if (reasoningTimer) clearTimeout(reasoningTimer)
 })
 
 //复制函数

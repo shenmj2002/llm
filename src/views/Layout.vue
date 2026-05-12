@@ -228,7 +228,13 @@ onMounted(() => {
 
             <!-- 路径 2：有消息，普通渲染（消息数 < 阈值 或 正在流式输出） -->
             <div v-else-if="!useVirtualScroll" class="messages-container" ref="listContainer">
-                <ChatMessage v-for="msg in currentMessages" :key="msg.id" :message="msg" />
+                <!-- v-memo：只有这三个值变化时才重渲染该条目，流式时非末尾消息直接跳过 -->
+                <ChatMessage
+                    v-for="msg in currentMessages"
+                    :key="msg.id"
+                    :message="msg"
+                    v-memo="[msg.content, msg.reasoning_content, msg.loading]"
+                />
             </div>
 
             <!-- 路径 3：有消息，数量达到阈值且不在流式输出 → 虚拟列表 -->
