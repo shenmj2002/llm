@@ -2,6 +2,12 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'//定义一个store
 
 
+// RAG 引用来源
+export interface RagSource {
+    docName: string;
+    text: string;
+}
+
 // 定义消息类型
 interface Message {
     id: number;
@@ -11,7 +17,8 @@ interface Message {
     files: File[];
     completion_tokens?: string;
     speed: string;
-
+    loading?: boolean;        // 流式输出中为 true，结束后置 false
+    ragSources?: RagSource[]; // RAG 检索到的引用来源
 }
 // 定义对话类型
 interface Conversation {
@@ -91,6 +98,18 @@ export const useChatStore = defineStore('llm-chat',
             }
         }
 
+        // 设置最后一条消息的 loading 状态
+        const setLastMessageLoading = (value: boolean) => {
+            const msgs = currentConversation.value?.messages
+            if (msgs?.length) msgs[msgs.length - 1].loading = value
+        }
+
+        // 设置最后一条消息的 RAG 引用来源
+        const setLastMessageSources = (sources: RagSource[]) => {
+            const msgs = currentConversation.value?.messages
+            if (msgs?.length) msgs[msgs.length - 1].ragSources = sources
+        }
+
         //得到最新message
         const getLastMessage = () => {
             if (currentConversation.value?.messages.length && currentConversation.value?.messages.length > 0) {
@@ -151,7 +170,9 @@ export const useChatStore = defineStore('llm-chat',
             updateLastMessage,
             getLastMessage,
             deleteConversation,
-            updateTitleFromMessage
+            updateTitleFromMessage,
+            setLastMessageLoading,
+            setLastMessageSources,
         }// 暴露状态供组件使用
     },
     {

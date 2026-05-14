@@ -81,9 +81,9 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
             messageHandle.formatMessage("user", messageContent.text, " ", messageContent.files)
         )
         chatStore.updateTitleFromMessage(messageContent.text)
-        // 添加空的助手消息占位
+        // 添加空的助手消息占位，loading=true 表示生成中
         chatStore.addMessage(
-            messageHandle.formatMessage("assistant", "", "", [])
+            messageHandle.formatMessage("assistant", "", "", [], true)
         )
         chatStore.setIsLoading(true)
 
@@ -114,6 +114,10 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
                 settingStore.settings.stream,
                 (content: string, reasoning_content: string, completion_tokens: string, speed: string) => {
                     chatStore.updateLastMessage(content, reasoning_content, completion_tokens, speed)
+                },
+                // RAG 来源回调：sources 在 LLM 流式输出前到达，立即挂到当前助手消息
+                (sources: any[]) => {
+                    chatStore.setLastMessageSources(sources)
                 }
             )
         }
@@ -122,7 +126,8 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
         chatStore.updateLastMessage('抱歉，发生了一些错误，请稍后重试。', " ", " ", " ")
     } finally {
         chatStore.setIsLoading(false)
-        // toolStatus 由 toolCallback 里的 setTimeout 负责清除，这里不提前清空
+        // 流式结束，关闭 loading 状态（触发 ChatMessage 里的防抖立即刷新）
+        chatStore.setLastMessageLoading(false)
     }
 }
 

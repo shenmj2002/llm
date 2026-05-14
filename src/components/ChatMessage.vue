@@ -19,6 +19,12 @@ const toggleReasoning = () => {
     isReasoningExpanded.value = !isReasoningExpanded.value
 }
 
+// RAG 引用来源展开折叠（默认折叠）
+const sourcesExpanded = ref(false)
+const toggleSources = () => {
+    sourcesExpanded.value = !sourcesExpanded.value
+}
+
 // 用 ref 手动存储渲染结果，配合防抖实现 chunk 合并渲染
 const renderedContent = ref('')
 const renderedReasoning = ref('')
@@ -187,6 +193,31 @@ onMounted(() => {
             </div>
             <!--content消息内容  -->
             <div class="bubble " v-html="renderedContent"></div>
+            <!-- RAG 引用来源面板（仅助手消息且有来源时展示） -->
+            <div v-if="message.ragSources?.length && message.role === 'assistant'" class="rag-sources">
+                <div class="rag-sources-header" @click="toggleSources">
+                    <el-icon><Document /></el-icon>
+                    <span>参考来源（{{ message.ragSources.length }} 条）</span>
+                    <div class="rag-expand-icon" :class="{ expanded: sourcesExpanded }">
+                        <el-icon><ArrowDown /></el-icon>
+                    </div>
+                </div>
+                <transition name="rag-slide">
+                    <div v-if="sourcesExpanded" class="rag-sources-list">
+                        <div
+                            v-for="(source, i) in message.ragSources"
+                            :key="i"
+                            class="rag-source-item"
+                        >
+                            <div class="rag-source-header">
+                                <span class="rag-source-index">[{{ Number(i) + 1 }}]</span>
+                                <span class="rag-source-name">{{ source.docName }}</span>
+                            </div>
+                            <div class="rag-source-text">{{ source.text }}</div>
+                        </div>
+                    </div>
+                </transition>
+            </div>
             <!-- 复制按钮和 tokens 信息 -->
             <div class="message-actions" v-if="message.loading === false && message.role === 'assistant'">
                 <!--复制按钮   title: 当用户鼠标悬停在按钮上时显示的提示内容 -->
@@ -590,5 +621,110 @@ onMounted(() => {
         }
 
     }
+}
+
+// ── RAG 引用来源面板 ───────────────────────────────────────────────────────────
+.rag-sources {
+    margin-top: 0.75rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 0.82rem;
+
+    .rag-sources-header {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        background: var(--rag-header-bg, #f5f7fa);
+        color: var(--rag-header-color, #555);
+        user-select: none;
+        transition: background 0.15s;
+
+        &:hover {
+            background: var(--rag-header-hover-bg, #eaecf0);
+        }
+
+        span {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        .rag-expand-icon {
+            transition: transform 0.2s;
+            display: flex;
+            align-items: center;
+
+            &.expanded {
+                transform: rotate(180deg);
+            }
+        }
+    }
+
+    .rag-sources-list {
+        border-top: 1px solid var(--border-color, #e0e0e0);
+
+        .rag-source-item {
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid var(--border-color, #f0f0f0);
+
+            &:last-child {
+                border-bottom: none;
+            }
+
+            .rag-source-header {
+                display: flex;
+                align-items: center;
+                gap: 0.4rem;
+                margin-bottom: 0.35rem;
+
+                .rag-source-index {
+                    font-size: 0.72rem;
+                    font-weight: 600;
+                    color: #fff;
+                    background: var(--primary-color, #4a9eff);
+                    border-radius: 3px;
+                    padding: 0.05rem 0.3rem;
+                    line-height: 1.5;
+                    flex-shrink: 0;
+                }
+
+                .rag-source-name {
+                    font-weight: 600;
+                    color: var(--rag-name-color, #333);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+            }
+
+            .rag-source-text {
+                color: var(--rag-text-color, #555);
+                line-height: 1.6;
+                max-height: 6em;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                word-break: break-word;
+                padding: 0.4rem 0.5rem;
+                background: var(--rag-text-bg, #fafbfc);
+                border-left: 3px solid var(--primary-color, #4a9eff);
+                border-radius: 0 4px 4px 0;
+            }
+        }
+    }
+}
+
+// 展开/折叠动画
+.rag-slide-enter-active,
+.rag-slide-leave-active {
+    transition: max-height 0.25s ease, opacity 0.2s ease;
+    overflow: hidden;
+    max-height: 600px;
+}
+.rag-slide-enter-from,
+.rag-slide-leave-to {
+    max-height: 0;
+    opacity: 0;
 }
 </style>

@@ -110,6 +110,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     let { ragEnabled, ...llmPayload } = req.body
+    let ragChunks = []  // 保存检索到的 chunks，用于后续注入前端
 
     // RAG 检索：把相关内容注入 system prompt
     if (ragEnabled) {
@@ -121,10 +122,9 @@ app.post('/api/chat', async (req, res) => {
         : rawContent
 
       if (lastUserQuery) {
-        //从知识库检索相关内容
-        const chunks = await retrieveChunks(lastUserQuery, apiKey)
-        if (chunks.length > 0) {
-          const context = chunks.map((c, i) => `[${i + 1}] (来源: ${c.docName})\n${c.text}`).join('\n\n')
+        ragChunks = await retrieveChunks(lastUserQuery, apiKey)
+        if (ragChunks.length > 0) {
+          const context = ragChunks.map((c, i) => `[${i + 1}] (来源: ${c.docName})\n${c.text}`).join('\n\n')
           const systemMessage = {
             role: 'system',
             content: `你是一个知识库助手，请优先基于以下参考资料回答问题，资料中没有的内容可以结合自身知识补充。\n\n参考资料：\n${context}`,
@@ -157,6 +157,11 @@ app.post('/api/chat', async (req, res) => {
     if (req.body.stream) {
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('X-Accel-Buffering', 'no')
+      // 流式：RAG 找到来源时，在 LLM 流开始前注入 rag_sources 事件
+      if (ragChunks.length > 0) {
+        const sources = ragChunks.map(c => ({ docName: c.docName, text: c.text }))
+        res.write(`data: ${JSON.stringify({ type: 'rag_sources', sources })}\n\n`)
+      }
       upstream.body.pipeTo(
         new WritableStream({
           write(chunk) { res.write(chunk) },
@@ -166,6 +171,10 @@ app.post('/api/chat', async (req, res) => {
       )
     } else {
       const data = await upstream.json()
+      // 非流式：RAG 来源附在响应体里
+      if (ragChunks.length > 0) {
+        data.rag_sources = ragChunks.map(c => ({ docName: c.docName, text: c.text }))
+      }
       res.json(data)
     }
   } catch (err) {
