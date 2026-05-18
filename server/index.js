@@ -104,6 +104,20 @@ app.delete('/api/rag/documents/:id', async (req, res) => {
 
 // ---------- Chat 路由 ----------
 
+/** 将检索片段转为前端 citations / rag_sources（与正文 [n] 编号一致） */
+function buildRagCitationPayload(chunks) {
+  return chunks.map((c, i) => ({
+    citationId: i + 1,
+    docId: c.docId || '',
+    docTitle: c.docName,
+    chunkId: c.chunkId || '',
+    location: { type: 'chunk', label: '检索向量片段' },
+    snippet: c.text,
+    docName: c.docName,
+    text: c.text,
+  }))
+}
+
 app.post('/api/chat', async (req, res) => {
   const apiKey = process.env.LLM_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'LLM_API_KEY is not set in .env' })
@@ -124,10 +138,15 @@ app.post('/api/chat', async (req, res) => {
       if (lastUserQuery) {
         ragChunks = await retrieveChunks(lastUserQuery, apiKey)
         if (ragChunks.length > 0) {
-          const context = ragChunks.map((c, i) => `[${i + 1}] (来源: ${c.docName})\n${c.text}`).join('\n\n')
+          const context = ragChunks
+            .map(
+              (c, i) =>
+                `[${i + 1}] (文档ID: ${c.docId || '—'} | chunk: ${c.chunkId || '—'} | ${c.docName})\n${c.text}`,
+            )
+            .join('\n\n')
           const systemMessage = {
             role: 'system',
-            content: `你是一个知识库助手，请优先基于以下参考资料回答问题，资料中没有的内容可以结合自身知识补充。\n\n参考资料：\n${context}`,
+            content: `你是一个知识库助手，请优先基于以下参考资料作答；资料没有的再结合自身知识简要说明。\n\n引用格式（必须严格遵守）：陈述来自参考资料的事实时，在该句末尾或紧随其后使用方括号编号，如 [1]、[2]，编号必须与下方「参考资料」条目前的 [n] 一致，不要编造编号；同一句可连用多个编号如 [1][2]。不要使用脚注链接或 JSON，只用正文 Markdown + [n]。\n\n参考资料：\n${context}`,
           }
           llmPayload.messages = [systemMessage, ...llmPayload.messages]
         }
@@ -159,8 +178,8 @@ app.post('/api/chat', async (req, res) => {
       res.setHeader('X-Accel-Buffering', 'no')
       // 流式：RAG 找到来源时，在 LLM 流开始前注入 rag_sources 事件
       if (ragChunks.length > 0) {
-        const sources = ragChunks.map(c => ({ docName: c.docName, text: c.text }))
-        res.write(`data: ${JSON.stringify({ type: 'rag_sources', sources })}\n\n`)
+        const citations = buildRagCitationPayload(ragChunks)
+        res.write(`data: ${JSON.stringify({ type: 'rag_sources', sources: citations, citations })}\n\n`)
       }
       upstream.body.pipeTo(
         new WritableStream({
@@ -173,7 +192,7 @@ app.post('/api/chat', async (req, res) => {
       const data = await upstream.json()
       // 非流式：RAG 来源附在响应体里
       if (ragChunks.length > 0) {
-        data.rag_sources = ragChunks.map(c => ({ docName: c.docName, text: c.text }))
+        data.rag_sources = buildRagCitationPayload(ragChunks)
       }
       res.json(data)
     }

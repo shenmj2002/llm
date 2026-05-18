@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Document, Loading, Sunny, ArrowDown } from '@element-plus/icons-vue'
-import { ref, watch, onUnmounted, onMounted } from "vue";
+import { ref, watch, onUnmounted, onMounted, nextTick } from "vue";
 import { rederMarkdown } from "@/utils/markdown";
+import { linkifyCitationMarkers } from "@/utils/citationMarkup";
 import copyIcon from '@/assets/photo/复制.png'
 
 
@@ -12,6 +13,22 @@ const props = defineProps({
         default: " "
     }
 })
+
+function maxCitationIndex(sources: unknown[] | undefined): number {
+    if (!sources?.length) return 0
+    return Math.max(
+        sources.length,
+        ...sources.map((s: any) => (typeof s.citationId === 'number' ? s.citationId : 0)),
+    )
+}
+
+/** 正文 Markdown → HTML，若有 RAG 来源则把 [n] 转成可点击锚点（不触碰 <pre> 内文本） */
+function markdownToBubbleHtml(markdown: string) {
+    const raw = rederMarkdown(markdown || '')
+    const max = maxCitationIndex(props.message.ragSources as unknown[] | undefined)
+    if (max < 1) return raw
+    return linkifyCitationMarkers(raw, max)
+}
 
 //深度思考部分展开折叠
 const isReasoningExpanded = ref(true)
@@ -25,6 +42,51 @@ const toggleSources = () => {
     sourcesExpanded.value = !sourcesExpanded.value
 }
 
+/** 点击 [n] 后短暂高亮的证据条目 */
+const citationFlashId = ref<number | null>(null)
+const messageRootEl = ref<HTMLElement | null>(null)
+
+function citationDisplayId(source: Record<string, unknown>, index: number) {
+    const id = source.citationId
+    return typeof id === 'number' && id > 0 ? id : index + 1
+}
+
+function scrollToCitation(citationNum: number) {
+    sourcesExpanded.value = true
+    citationFlashId.value = citationNum
+    nextTick(() => {
+        const root = messageRootEl.value
+        const row = (root?.querySelector(
+            `.rag-source-item[data-citation-id="${citationNum}"]`,
+        ) ?? null) as HTMLElement | null
+        row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        window.setTimeout(() => {
+            if (citationFlashId.value === citationNum) citationFlashId.value = null
+        }, 2200)
+    })
+}
+
+function onCitationBubbleClick(e: MouseEvent) {
+    const el = (e.target as HTMLElement).closest('.cite-ref')
+    if (!el) return
+    e.preventDefault()
+    const raw = el.getAttribute('data-cite')
+    const id = raw ? parseInt(raw, 10) : NaN
+    if (!Number.isFinite(id) || id < 1) return
+    scrollToCitation(id)
+}
+
+function onCitationBubbleKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    const el = (e.target as HTMLElement).closest('.cite-ref')
+    if (!el) return
+    e.preventDefault()
+    const raw = el.getAttribute('data-cite')
+    const id = raw ? parseInt(raw, 10) : NaN
+    if (!Number.isFinite(id) || id < 1) return
+    scrollToCitation(id)
+}
+
 // 用 ref 手动存储渲染结果，配合防抖实现 chunk 合并渲染
 const renderedContent = ref('')
 const renderedReasoning = ref('')
@@ -35,16 +97,14 @@ let reasoningTimer: ReturnType<typeof setTimeout> | null = null
 // content：流式时 80ms 内多次更新只渲染最新值（合并 chunk）
 // 消息加载完成（loading=false）时立刻强制渲染一次保证最终内容完整
 watch(
-    () => [props.message.content, props.message.loading] as const,
+    () => [props.message.content, props.message.loading, props.message.ragSources] as const,
     ([content, loading]) => {
         if (contentTimer) clearTimeout(contentTimer)
         if (!loading) {
-            // 已结束：立刻渲染最终结果
-            renderedContent.value = rederMarkdown(content || '')
+            renderedContent.value = markdownToBubbleHtml(content || '')
         } else {
-            // 流式中：80ms 防抖，合并快速到来的 chunk
             contentTimer = setTimeout(() => {
-                renderedContent.value = rederMarkdown(content || '')
+                renderedContent.value = markdownToBubbleHtml(content || '')
             }, 80)
         }
     },
@@ -147,7 +207,7 @@ onMounted(() => {
 
 <template>
     <!-- 动态绑定：当message.role==='user'时，类名为is-mine ，{}里面为对象-->
-    <div class="message-item" :class="{ 'is-mine': message.role === 'user' }">
+    <div ref="messageRootEl" class="message-item" :class="{ 'is-mine': message.role === 'user' }">
         <!-- 文件预览区域  因为message.files是数组所以还要length>0-->
         <div class="files-container" v-if="message.files && message.files.length > 0">
             <div class="files-item" v-for="file in message.files" :key="file.url">
@@ -192,7 +252,10 @@ onMounted(() => {
             <div class="reasoning " v-if="message.reasoning_content && isReasoningExpanded" v-html="renderedReasoning">
             </div>
             <!--content消息内容  -->
-            <div class="bubble " v-html="renderedContent"></div>
+            <div class="bubble" v-html="renderedContent"
+                @click="onCitationBubbleClick"
+                @keydown="onCitationBubbleKeyDown"
+            ></div>
             <!-- RAG 引用来源面板（仅助手消息且有来源时展示） -->
             <div v-if="message.ragSources?.length && message.role === 'assistant'" class="rag-sources">
                 <div class="rag-sources-header" @click="toggleSources">
@@ -206,14 +269,24 @@ onMounted(() => {
                     <div v-if="sourcesExpanded" class="rag-sources-list">
                         <div
                             v-for="(source, i) in message.ragSources"
-                            :key="i"
+                            :key="(source.chunkId || '') + '_' + citationDisplayId(source, Number(i))"
                             class="rag-source-item"
+                            :class="{ 'is-cite-active': citationFlashId === citationDisplayId(source, Number(i)) }"
+                            :data-citation-id="citationDisplayId(source, Number(i))"
                         >
                             <div class="rag-source-header">
-                                <span class="rag-source-index">[{{ Number(i) + 1 }}]</span>
-                                <span class="rag-source-name">{{ source.docName }}</span>
+                                <span class="rag-source-index">[{{ citationDisplayId(source, Number(i)) }}]</span>
+                                <span class="rag-source-name">{{ source.docTitle || source.docName }}</span>
                             </div>
-                            <div class="rag-source-text">{{ source.text }}</div>
+                            <div v-if="source.docId || source.chunkId" class="rag-source-ids">
+                                <span v-if="source.docId" class="id-tag" :title="'docId：' + source.docId">
+                                    doc: {{ source.docId.length > 24 ? source.docId.slice(0, 24) + '…' : source.docId }}
+                                </span>
+                                <span v-if="source.chunkId" class="id-tag" :title="'chunkId：' + source.chunkId">
+                                    chunk: {{ source.chunkId.length > 20 ? source.chunkId.slice(0, 20) + '…' : source.chunkId }}
+                                </span>
+                            </div>
+                            <div class="rag-source-text">{{ source.snippet ?? source.text }}</div>
                         </div>
                     </div>
                 </transition>
@@ -574,6 +647,20 @@ onMounted(() => {
                 max-width: 100%; // 限制最大宽度
                 border-radius: 0.5rem; // 圆角
             }
+
+            // 行内引用 [n]，可点击跳到侧栏证据
+            :deep(.cite-ref) {
+                cursor: pointer;
+                color: var(--primary-color, #3b82f6);
+                font-weight: 600;
+                text-decoration: underline dotted;
+                text-underline-offset: 2px;
+            }
+            :deep(.cite-ref:focus) {
+                outline: 2px solid var(--primary-color, #93c5fd);
+                outline-offset: 1px;
+                border-radius: 2px;
+            }
         }
 
         //复制按钮+token
@@ -668,6 +755,13 @@ onMounted(() => {
         .rag-source-item {
             padding: 0.6rem 0.75rem;
             border-bottom: 1px solid var(--border-color, #f0f0f0);
+            border-radius: 4px;
+            transition: box-shadow 0.2s, background 0.2s;
+
+            &.is-cite-active {
+                background: rgba(59, 130, 246, 0.08);
+                box-shadow: inset 3px 0 0 var(--primary-color, #3b82f6);
+            }
 
             &:last-child {
                 border-bottom: none;
@@ -696,6 +790,25 @@ onMounted(() => {
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                }
+            }
+
+            .rag-source-ids {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.35rem;
+                margin-bottom: 0.35rem;
+
+                .id-tag {
+                    font-size: 0.68rem;
+                    color: #64748b;
+                    background: #f1f5f9;
+                    padding: 0.08rem 0.35rem;
+                    border-radius: 3px;
+                    max-width: 100%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
             }
 

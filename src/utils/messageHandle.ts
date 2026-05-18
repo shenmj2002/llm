@@ -40,7 +40,8 @@ export const messageHandle = {
 
                         // RAG 来源事件：在 LLM 流式输出前到达，立即通知 UI
                         if (data.type === 'rag_sources') {
-                            sourcesCallback?.(data.sources)
+                            const list = (data.citations?.length ? data.citations : data.sources) || []
+                            sourcesCallback?.(list)
                             continue
                         }
 

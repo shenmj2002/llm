@@ -15,6 +15,7 @@
     "lint": "eslint . --fix"
   },
   "dependencies": {
+    "@dqbd/tiktoken": "^1.0.22",
     "@element-plus/icons-vue": "^2.3.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chromadb": "^3.4.3",

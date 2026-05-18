@@ -238,7 +238,7 @@ onMounted(() => {
                     v-for="msg in currentMessages"
                     :key="msg.id"
                     :message="msg"
-                    v-memo="[msg.content, msg.reasoning_content, msg.loading]"
+                    v-memo="[msg.content, msg.reasoning_content, msg.loading, msg.ragSources]"
                 />
             </div>
 
@@ -256,7 +256,7 @@ onMounted(() => {
                     <DynamicScrollerItem
                         :item="item"
                         :active="active"
-                        :size-dependencies="[item.content, item.reasoning_content]"
+                            :size-dependencies="[item.content, item.reasoning_content, item.ragSources]"
                     >
                         <ChatMessage :message="item" />
                     </DynamicScrollerItem>

@@ -2,10 +2,21 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'//定义一个store
 
 
-// RAG 引用来源
+// RAG 引用（结构化 citations；兼容旧消息的 docName + text）
+export interface RagCitationLocation {
+    type: string;
+    label?: string;
+}
+
 export interface RagSource {
-    docName: string;
-    text: string;
+    citationId?: number;
+    docId?: string;
+    docTitle?: string;
+    chunkId?: string;
+    location?: RagCitationLocation;
+    snippet?: string;
+    docName?: string;
+    text?: string;
 }
 
 // 定义消息类型
