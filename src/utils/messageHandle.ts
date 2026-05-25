@@ -25,6 +25,7 @@ export const messageHandle = {
         let accumlatedContent = " "
         let accumlatedReasoning = " "
         let startTime = Date.now()
+        let lastTokens = 0
 
         while (true) {
             const { done, value } = await reader.read()
@@ -45,10 +46,28 @@ export const messageHandle = {
                             continue
                         }
 
+                        // 后端已根据草稿+资料插入句内 [n]，整块替换正文
+                        if (data.type === 'answer_citations') {
+                            const text = typeof data.content === 'string' ? data.content : ''
+                            if (text) {
+                                accumlatedContent = text
+                                updateCallback(
+                                    accumlatedContent,
+                                    accumlatedReasoning,
+                                    lastTokens,
+                                    ((Math.max(lastTokens, 1)) / ((Date.now() - startTime) / 1000)).toFixed(2),
+                                )
+                            }
+                            continue
+                        }
+
                         const content = data.choices?.[0]?.delta?.content || ""
                         const reasoning = data.choices?.[0]?.delta?.reasoning_content || ""
                         accumlatedContent += content
                         accumlatedReasoning += reasoning
+
+                        const tok = data.usage?.completion_tokens
+                        if (typeof tok === 'number' && tok > 0) lastTokens = tok
 
                         updateCallback(
                             accumlatedContent,

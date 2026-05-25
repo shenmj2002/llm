@@ -19,6 +19,15 @@ export interface RagSource {
     text?: string;
 }
 
+/** Agent / MCP：一次工具调用在 UI 中的一条轨迹（服务端按顺序 start → done） */
+export interface AgentToolCallRecord {
+    id: string;
+    name: string;
+    status: 'running' | 'done';
+    args?: Record<string, unknown>;
+    result?: string;
+}
+
 // 定义消息类型
 interface Message {
     id: number;
@@ -30,6 +39,9 @@ interface Message {
     speed: string;
     loading?: boolean;        // 流式输出中为 true，结束后置 false
     ragSources?: RagSource[]; // RAG 检索到的引用来源
+    agentToolCalls?: AgentToolCallRecord[];
+    /** 每次追加/完结一条工具轨迹时递增，供 v-memo 感知「同上一条数，但状态已变」 */
+    agentToolTraceVersion?: number;
 }
 // 定义对话类型
 interface Conversation {
@@ -121,6 +133,53 @@ export const useChatStore = defineStore('llm-chat',
             if (msgs?.length) msgs[msgs.length - 1].ragSources = sources
         }
 
+        /** Agent 模式下记录 MCP tool_start / tool_done（新数组赋值，便于 v-memo 与视图刷新） */
+        const recordAgentToolEvent = (
+            phase: 'start' | 'done',
+            toolName: string,
+            payload?: Record<string, unknown> | string,
+        ) => {
+            const msgs = currentConversation.value?.messages
+            if (!msgs?.length) return
+            const lastMessage = msgs[msgs.length - 1]
+            if (lastMessage.role !== 'assistant') return
+
+            const prev = lastMessage.agentToolCalls ?? []
+            if (phase === 'start') {
+                const row: AgentToolCallRecord = {
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+                    name: toolName,
+                    status: 'running',
+                }
+                if (payload !== undefined && typeof payload === 'object' && payload !== null) {
+                    row.args = payload as Record<string, unknown>
+                }
+                lastMessage.agentToolCalls = [...prev, row]
+                lastMessage.agentToolTraceVersion = (lastMessage.agentToolTraceVersion ?? 0) + 1
+                return
+            }
+
+            /** 服务端当前为串行执行工具：done 对齐「最近一次仍在 running」的条目 */
+            const next = prev.map(r => ({ ...r }))
+            for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].status !== 'running') continue
+                const resultText =
+                    typeof payload === 'string'
+                        ? payload
+                        : payload != null && typeof payload === 'object'
+                            ? JSON.stringify(payload, null, 2)
+                            : ''
+                next[i] = {
+                    ...next[i],
+                    status: 'done',
+                    result: resultText || next[i].result,
+                }
+                break
+            }
+            lastMessage.agentToolCalls = next
+            lastMessage.agentToolTraceVersion = (lastMessage.agentToolTraceVersion ?? 0) + 1
+        }
+
         //得到最新message
         const getLastMessage = () => {
             if (currentConversation.value?.messages.length && currentConversation.value?.messages.length > 0) {
@@ -184,6 +243,7 @@ export const useChatStore = defineStore('llm-chat',
             updateTitleFromMessage,
             setLastMessageLoading,
             setLastMessageSources,
+            recordAgentToolEvent,
         }// 暴露状态供组件使用
     },
     {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Document, Loading, Sunny, ArrowDown } from '@element-plus/icons-vue'
-import { ref, watch, onUnmounted, onMounted, nextTick } from "vue";
+import { Document, Loading, Sunny, ArrowDown, Tools } from '@element-plus/icons-vue'
+import { ref, computed, watch, onUnmounted, onMounted, nextTick } from "vue";
 import { rederMarkdown } from "@/utils/markdown";
 import { linkifyCitationMarkers } from "@/utils/citationMarkup";
 import copyIcon from '@/assets/photo/复制.png'
@@ -30,50 +30,149 @@ function markdownToBubbleHtml(markdown: string) {
     return linkifyCitationMarkers(raw, max)
 }
 
+function citationDisplayId(source: Record<string, unknown>, index: number) {
+    const id = source.citationId
+    return typeof id === 'number' && id > 0 ? id : index + 1
+}
+
+/** 按 citation 编号解析 RagSource */
+function resolveCitationSource(citationNum: number): Record<string, unknown> | null {
+    const sources = props.message.ragSources as Record<string, unknown>[] | undefined
+    if (!sources?.length) return null
+    for (let i = 0; i < sources.length; i++) {
+        if (citationDisplayId(sources[i], i) === citationNum) return sources[i]
+    }
+    return null
+}
+
+// RAG：内联引用旁侧浮层（类 tooltip）
+const citePopoverVisible = ref(false)
+const citePopoverId = ref<number | null>(null)
+const citePopoverStyle = ref<Record<string, string>>({})
+const citePopoverRef = ref<HTMLElement | null>(null)
+/** 当前锚点元素，用于滚动/resize 时重算位置 */
+let lastCiteAnchorEl: HTMLElement | null = null
+let citePopoverDocCleanup: (() => void) | null = null
+
+const citePopoverPayload = computed(() => {
+    const id = citePopoverId.value
+    if (id == null) return null
+    const src = resolveCitationSource(id)
+    const title = String(src?.docTitle || src?.docName || '参考来源')
+    const body = String(src?.snippet || src?.text || '（无摘要）')
+    const docId = src?.docId != null ? String(src.docId) : ''
+    const chunkId = src?.chunkId != null ? String(src.chunkId) : ''
+    return { id, title, body, docId, chunkId }
+})
+
+function closeCitePopover() {
+    citePopoverVisible.value = false
+    citePopoverId.value = null
+    lastCiteAnchorEl = null
+    citePopoverStyle.value = {}
+}
+
+function updateCitePopoverPosition(anchor: HTMLElement) {
+    const rect = anchor.getBoundingClientRect()
+    const margin = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const preferW = Math.min(340, vw - 2 * margin)
+    let left = rect.left
+    let top = rect.bottom + 6
+
+    if (left + preferW > vw - margin) left = Math.max(margin, vw - preferW - margin)
+    if (left < margin) left = margin
+
+    citePopoverStyle.value = {
+        position: 'fixed',
+        left: `${Math.round(left)}px`,
+        top: `${Math.round(top)}px`,
+        width: `${Math.round(preferW)}px`,
+        zIndex: '10060',
+    }
+
+    nextTick(() => {
+        const pop = citePopoverRef.value
+        if (!pop) return
+        const ph = pop.getBoundingClientRect().height
+        if (top + ph > vh - margin) {
+            const flipped = Math.max(margin, rect.top - ph - 6)
+            citePopoverStyle.value = { ...citePopoverStyle.value, top: `${Math.round(flipped)}px` }
+        }
+    })
+}
+
+function toggleCitePopover(citationNum: number, anchor: HTMLElement) {
+    if (citePopoverVisible.value && citePopoverId.value === citationNum) {
+        closeCitePopover()
+        return
+    }
+    citePopoverId.value = citationNum
+    citePopoverVisible.value = true
+    lastCiteAnchorEl = anchor
+    updateCitePopoverPosition(anchor)
+}
+
+function bindCitePopoverOutsideClose() {
+    citePopoverDocCleanup?.()
+    const onDocMouseDown = (ev: MouseEvent) => {
+        const target = ev.target as HTMLElement | null
+        if (!target) return
+        if (citePopoverRef.value?.contains(target)) return
+        if (target.closest('.cite-ref')) return
+        closeCitePopover()
+    }
+    const onKeyDown = (ev: KeyboardEvent) => {
+        if (ev.key === 'Escape') closeCitePopover()
+    }
+    const onResizeScroll = () => {
+        if (lastCiteAnchorEl && citePopoverVisible.value)
+            updateCitePopoverPosition(lastCiteAnchorEl)
+    }
+
+    document.addEventListener('mousedown', onDocMouseDown, true)
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('resize', onResizeScroll)
+
+    citePopoverDocCleanup = () => {
+        document.removeEventListener('mousedown', onDocMouseDown, true)
+        window.removeEventListener('keydown', onKeyDown, true)
+        window.removeEventListener('resize', onResizeScroll)
+        citePopoverDocCleanup = null
+    }
+}
+
+watch(citePopoverVisible, (open) => {
+    if (open) bindCitePopoverOutsideClose()
+    else citePopoverDocCleanup?.()
+})
+
+/** Agent/MCP：将参数序列化为可读文本（含非 JSON 兼容值则降级） */
+function formatToolArgsJson(args?: Record<string, unknown>) {
+    if (!args || Object.keys(args).length === 0) return ''
+    try {
+        return JSON.stringify(args, null, 2)
+    } catch {
+        return String(args)
+    }
+}
+
 //深度思考部分展开折叠
 const isReasoningExpanded = ref(true)
 const toggleReasoning = () => {
     isReasoningExpanded.value = !isReasoningExpanded.value
 }
 
-// RAG 引用来源展开折叠（默认折叠）
-const sourcesExpanded = ref(false)
-const toggleSources = () => {
-    sourcesExpanded.value = !sourcesExpanded.value
-}
-
-/** 点击 [n] 后短暂高亮的证据条目 */
-const citationFlashId = ref<number | null>(null)
-const messageRootEl = ref<HTMLElement | null>(null)
-
-function citationDisplayId(source: Record<string, unknown>, index: number) {
-    const id = source.citationId
-    return typeof id === 'number' && id > 0 ? id : index + 1
-}
-
-function scrollToCitation(citationNum: number) {
-    sourcesExpanded.value = true
-    citationFlashId.value = citationNum
-    nextTick(() => {
-        const root = messageRootEl.value
-        const row = (root?.querySelector(
-            `.rag-source-item[data-citation-id="${citationNum}"]`,
-        ) ?? null) as HTMLElement | null
-        row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        window.setTimeout(() => {
-            if (citationFlashId.value === citationNum) citationFlashId.value = null
-        }, 2200)
-    })
-}
-
 function onCitationBubbleClick(e: MouseEvent) {
     const el = (e.target as HTMLElement).closest('.cite-ref')
     if (!el) return
     e.preventDefault()
+    e.stopPropagation()
     const raw = el.getAttribute('data-cite')
     const id = raw ? parseInt(raw, 10) : NaN
     if (!Number.isFinite(id) || id < 1) return
-    scrollToCitation(id)
+    toggleCitePopover(id, el as HTMLElement)
 }
 
 function onCitationBubbleKeyDown(e: KeyboardEvent) {
@@ -81,10 +180,11 @@ function onCitationBubbleKeyDown(e: KeyboardEvent) {
     const el = (e.target as HTMLElement).closest('.cite-ref')
     if (!el) return
     e.preventDefault()
+    e.stopPropagation()
     const raw = el.getAttribute('data-cite')
     const id = raw ? parseInt(raw, 10) : NaN
     if (!Number.isFinite(id) || id < 1) return
-    scrollToCitation(id)
+    toggleCitePopover(id, el as HTMLElement)
 }
 
 // 用 ref 手动存储渲染结果，配合防抖实现 chunk 合并渲染
@@ -131,6 +231,8 @@ watch(
 onUnmounted(() => {
     if (contentTimer) clearTimeout(contentTimer)
     if (reasoningTimer) clearTimeout(reasoningTimer)
+    citePopoverDocCleanup?.()
+    closeCitePopover()
 })
 
 //复制函数
@@ -207,7 +309,7 @@ onMounted(() => {
 
 <template>
     <!-- 动态绑定：当message.role==='user'时，类名为is-mine ，{}里面为对象-->
-    <div ref="messageRootEl" class="message-item" :class="{ 'is-mine': message.role === 'user' }">
+    <div class="message-item" :class="{ 'is-mine': message.role === 'user' }">
         <!-- 文件预览区域  因为message.files是数组所以还要length>0-->
         <div class="files-container" v-if="message.files && message.files.length > 0">
             <div class="files-item" v-for="file in message.files" :key="file.url">
@@ -235,6 +337,39 @@ onMounted(() => {
                 </el-icon>
                 <span>内容生成中...</span>
             </div>
+            <!-- MCP / Agent：工具调用过程与返回值 -->
+            <div
+                v-if="message.role === 'assistant' && message.agentToolCalls?.length"
+                class="agent-tool-panel"
+            >
+                <div class="agent-tool-panel-head">
+                    <el-icon><Tools /></el-icon>
+                    <span>MCP 工具</span>
+                </div>
+                <div
+                    v-for="tool in message.agentToolCalls"
+                    :key="tool.id"
+                    class="agent-tool-item"
+                    :class="{ 'is-running': tool.status === 'running' }"
+                >
+                    <div class="agent-tool-item-title">
+                        <code class="agent-tool-name">{{ tool.name }}</code>
+                        <span v-if="tool.status === 'running'" class="agent-tool-status-running">
+                            <el-icon class="agent-tool-spinner"><Loading /></el-icon>
+                            执行中…
+                        </span>
+                        <span v-else class="agent-tool-status-done">已完成</span>
+                    </div>
+                    <details v-if="formatToolArgsJson(tool.args)" class="agent-tool-details">
+                        <summary>调用参数</summary>
+                        <pre class="agent-tool-pre">{{ formatToolArgsJson(tool.args) }}</pre>
+                    </details>
+                    <details v-if="tool.status === 'done' && tool.result" class="agent-tool-details">
+                        <summary>返回结果</summary>
+                        <pre class="agent-tool-pre">{{ tool.result }}</pre>
+                    </details>
+                </div>
+            </div>
             <!-- 深度思考小按钮 -->
             <div class="thinking-botton" v-if="message.reasoning_content && message.role === 'assistant'"
                 @click="toggleReasoning">
@@ -251,46 +386,42 @@ onMounted(() => {
             <!-- reasoning深度思考内容 --><!--v-html: 将 Vue 实例中的变量解析为 HTML 字符串，并直接渲染到 DOM 中 -->
             <div class="reasoning " v-if="message.reasoning_content && isReasoningExpanded" v-html="renderedReasoning">
             </div>
+            <!-- 引用提示：下文「编号」可与 RAG 来源对应，点击即用浮层就地展示 -->
+            <p v-if="message.ragSources?.length && message.role === 'assistant'" class="cite-hint">
+                点击下方回复中的 <span class="cite-hint-mark">[编号]</span> 可就地查看参考依据摘要（再次点击同一编号、按 Esc、或点击空白处均可关闭）。
+            </p>
             <!--content消息内容  -->
             <div class="bubble" v-html="renderedContent"
                 @click="onCitationBubbleClick"
                 @keydown="onCitationBubbleKeyDown"
             ></div>
-            <!-- RAG 引用来源面板（仅助手消息且有来源时展示） -->
-            <div v-if="message.ragSources?.length && message.role === 'assistant'" class="rag-sources">
-                <div class="rag-sources-header" @click="toggleSources">
-                    <el-icon><Document /></el-icon>
-                    <span>参考来源（{{ message.ragSources.length }} 条）</span>
-                    <div class="rag-expand-icon" :class="{ expanded: sourcesExpanded }">
-                        <el-icon><ArrowDown /></el-icon>
-                    </div>
-                </div>
-                <transition name="rag-slide">
-                    <div v-if="sourcesExpanded" class="rag-sources-list">
-                        <div
-                            v-for="(source, i) in message.ragSources"
-                            :key="(source.chunkId || '') + '_' + citationDisplayId(source, Number(i))"
-                            class="rag-source-item"
-                            :class="{ 'is-cite-active': citationFlashId === citationDisplayId(source, Number(i)) }"
-                            :data-citation-id="citationDisplayId(source, Number(i))"
-                        >
-                            <div class="rag-source-header">
-                                <span class="rag-source-index">[{{ citationDisplayId(source, Number(i)) }}]</span>
-                                <span class="rag-source-name">{{ source.docTitle || source.docName }}</span>
-                            </div>
-                            <div v-if="source.docId || source.chunkId" class="rag-source-ids">
-                                <span v-if="source.docId" class="id-tag" :title="'docId：' + source.docId">
-                                    doc: {{ source.docId.length > 24 ? source.docId.slice(0, 24) + '…' : source.docId }}
-                                </span>
-                                <span v-if="source.chunkId" class="id-tag" :title="'chunkId：' + source.chunkId">
-                                    chunk: {{ source.chunkId.length > 20 ? source.chunkId.slice(0, 20) + '…' : source.chunkId }}
-                                </span>
-                            </div>
-                            <div class="rag-source-text">{{ source.snippet ?? source.text }}</div>
+
+            <Teleport to="body">
+                <div
+                    v-show="citePopoverVisible && citePopoverPayload"
+                    ref="citePopoverRef"
+                    class="cite-reference-popover"
+                    role="tooltip"
+                    :aria-hidden="!citePopoverVisible"
+                    :style="citePopoverStyle"
+                    @mousedown.stop
+                >
+                    <template v-if="citePopoverPayload">
+                        <div class="cite-popover-head">
+                            <span class="cite-popover-num">[{{ citePopoverPayload.id }}]</span>
+                            <span class="cite-popover-title">{{ citePopoverPayload.title }}</span>
                         </div>
-                    </div>
-                </transition>
-            </div>
+                        <div class="cite-popover-body">{{ citePopoverPayload.body }}</div>
+                        <div
+                            v-if="citePopoverPayload.docId || citePopoverPayload.chunkId"
+                            class="cite-popover-meta"
+                        >
+                            <span v-if="citePopoverPayload.docId" class="cite-meta-tag">doc: {{ citePopoverPayload.docId }}</span>
+                            <span v-if="citePopoverPayload.chunkId" class="cite-meta-tag">chunk: {{ citePopoverPayload.chunkId }}</span>
+                        </div>
+                    </template>
+                </div>
+            </Teleport>
             <!-- 复制按钮和 tokens 信息 -->
             <div class="message-actions" v-if="message.loading === false && message.role === 'assistant'">
                 <!--复制按钮   title: 当用户鼠标悬停在按钮上时显示的提示内容 -->
@@ -390,6 +521,117 @@ onMounted(() => {
                 width: 16px;
                 height: 16px;
                 animation: spin 1s linear infinite;
+            }
+        }
+
+        .agent-tool-panel {
+            margin: 6px 0 10px 12px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color, #e2e8f0);
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            max-width: min(100%, 520px);
+
+            &-head {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #475569;
+                margin-bottom: 8px;
+
+                .el-icon {
+                    color: var(--primary-color, #409eff);
+                }
+            }
+
+            .agent-tool-item {
+                padding: 6px 4px;
+                border-top: 1px solid rgba(148, 163, 184, 0.35);
+
+                &:first-of-type {
+                    border-top: none;
+                    padding-top: 2px;
+                }
+
+                &-title {
+                    display: flex;
+                    align-items: center;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                    padding: 4px 0;
+                }
+
+                .agent-tool-name {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #0f172a;
+                    padding: 1px 6px;
+                    background: rgba(59, 130, 246, 0.1);
+                    border-radius: 4px;
+                }
+
+                .agent-tool-status-running {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    font-size: 12px;
+                    color: #d97706;
+                }
+
+                .agent-tool-spinner {
+                    width: 14px;
+                    height: 14px;
+                    animation: spin 1s linear infinite;
+                }
+
+                .agent-tool-status-done {
+                    font-size: 12px;
+                    color: #15803d;
+                    font-weight: 500;
+                }
+
+                &.is-running {
+                    .agent-tool-name {
+                        animation: pulse-border 1.2s ease-in-out infinite alternate;
+                    }
+                }
+            }
+
+            @keyframes pulse-border {
+                from {
+                    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.25);
+                }
+                to {
+                    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+                }
+            }
+
+            .agent-tool-details {
+                margin-top: 4px;
+                font-size: 12px;
+
+                summary {
+                    cursor: pointer;
+                    color: var(--primary-color, #3f7af1);
+                    user-select: none;
+                }
+
+                .agent-tool-pre {
+                    margin: 6px 0 4px;
+                    padding: 8px;
+                    font-size: 11px;
+                    line-height: 1.45;
+                    background: rgba(255, 255, 255, 0.85);
+                    border-radius: 6px;
+                    border: 1px solid #e2e8f0;
+                    max-height: 200px;
+                    overflow: auto;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    color: #334155;
+                }
             }
         }
 
@@ -648,7 +890,7 @@ onMounted(() => {
                 border-radius: 0.5rem; // 圆角
             }
 
-            // 行内引用 [n]，可点击跳到侧栏证据
+            // 行内引用 [n]，点击就地弹出参考摘要
             :deep(.cite-ref) {
                 cursor: pointer;
                 color: var(--primary-color, #3b82f6);
@@ -660,6 +902,19 @@ onMounted(() => {
                 outline: 2px solid var(--primary-color, #93c5fd);
                 outline-offset: 1px;
                 border-radius: 2px;
+            }
+        }
+
+        .cite-hint {
+            margin: 0 0 0.35rem;
+            padding-left: 1rem;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            color: var(--text-color-secondary, #64748b);
+
+            .cite-hint-mark {
+                font-weight: 600;
+                color: var(--primary-color, #3b82f6);
             }
         }
 
@@ -710,134 +965,70 @@ onMounted(() => {
     }
 }
 
-// ── RAG 引用来源面板 ───────────────────────────────────────────────────────────
-.rag-sources {
-    margin-top: 0.75rem;
-    border: 1px solid var(--border-color, #e0e0e0);
+// ── 内联引用浮层（Teleport 至 body）──────────────────────────────────────────
+.cite-reference-popover {
+    box-sizing: border-box;
+    padding: 10px 12px;
     border-radius: 8px;
-    overflow: hidden;
-    font-size: 0.82rem;
+    border: 1px solid var(--border-color, #e2e8f0);
+    background: var(--bubble-bg, #fff);
+    box-shadow:
+        0 4px 20px rgba(15, 23, 42, 0.12),
+        0 0 0 1px rgba(15, 23, 42, 0.04);
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--text-color-primary, #1e293b);
+    pointer-events: auto;
+    max-height: min(45vh, 320px);
+    overflow: auto;
 
-    .rag-sources-header {
+    .cite-popover-head {
         display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.5rem 0.75rem;
-        cursor: pointer;
-        background: var(--rag-header-bg, #f5f7fa);
-        color: var(--rag-header-color, #555);
-        user-select: none;
-        transition: background 0.15s;
+        align-items: flex-start;
+        gap: 6px;
+        margin-bottom: 6px;
 
-        &:hover {
-            background: var(--rag-header-hover-bg, #eaecf0);
-        }
-
-        span {
-            flex: 1;
-            font-weight: 500;
-        }
-
-        .rag-expand-icon {
-            transition: transform 0.2s;
-            display: flex;
-            align-items: center;
-
-            &.expanded {
-                transform: rotate(180deg);
-            }
-        }
-    }
-
-    .rag-sources-list {
-        border-top: 1px solid var(--border-color, #e0e0e0);
-
-        .rag-source-item {
-            padding: 0.6rem 0.75rem;
-            border-bottom: 1px solid var(--border-color, #f0f0f0);
+        .cite-popover-num {
+            flex-shrink: 0;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #fff;
+            background: var(--primary-color, #3b82f6);
             border-radius: 4px;
-            transition: box-shadow 0.2s, background 0.2s;
+            padding: 0.05rem 0.35rem;
+            line-height: 1.4;
+        }
 
-            &.is-cite-active {
-                background: rgba(59, 130, 246, 0.08);
-                box-shadow: inset 3px 0 0 var(--primary-color, #3b82f6);
-            }
-
-            &:last-child {
-                border-bottom: none;
-            }
-
-            .rag-source-header {
-                display: flex;
-                align-items: center;
-                gap: 0.4rem;
-                margin-bottom: 0.35rem;
-
-                .rag-source-index {
-                    font-size: 0.72rem;
-                    font-weight: 600;
-                    color: #fff;
-                    background: var(--primary-color, #4a9eff);
-                    border-radius: 3px;
-                    padding: 0.05rem 0.3rem;
-                    line-height: 1.5;
-                    flex-shrink: 0;
-                }
-
-                .rag-source-name {
-                    font-weight: 600;
-                    color: var(--rag-name-color, #333);
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-            }
-
-            .rag-source-ids {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.35rem;
-                margin-bottom: 0.35rem;
-
-                .id-tag {
-                    font-size: 0.68rem;
-                    color: #64748b;
-                    background: #f1f5f9;
-                    padding: 0.08rem 0.35rem;
-                    border-radius: 3px;
-                    max-width: 100%;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-            }
-
-            .rag-source-text {
-                color: var(--rag-text-color, #555);
-                line-height: 1.6;
-                max-height: 6em;
-                overflow-y: auto;
-                white-space: pre-wrap;
-                word-break: break-word;
-                padding: 0.4rem 0.5rem;
-                background: var(--rag-text-bg, #fafbfc);
-                border-left: 3px solid var(--primary-color, #4a9eff);
-                border-radius: 0 4px 4px 0;
-            }
+        .cite-popover-title {
+            font-weight: 600;
+            word-break: break-word;
+            min-width: 0;
         }
     }
-}
 
-// 展开/折叠动画
-.rag-slide-enter-active,
-.rag-slide-leave-active {
-    transition: max-height 0.25s ease, opacity 0.2s ease;
-    overflow: hidden;
-    max-height: 600px;
-}
-.rag-slide-enter-from,
-.rag-slide-leave-to {
-    max-height: 0;
-    opacity: 0;
+    .cite-popover-body {
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text-color-secondary, #475569);
+        padding: 6px 0 2px;
+    }
+
+    .cite-popover-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
+
+        .cite-meta-tag {
+            font-size: 0.68rem;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
 }
 </style>

@@ -72,7 +72,6 @@ async function buildApiContent(text: string, files: File[]) {
     return parts
 }
 
-// 工具调用状态（在助手消息气泡上方展示）
 //发送消息
 const handleSend = async (messageContent: { text: string; files: any[]; rawFiles: File[] }) => {
     try {
@@ -104,7 +103,9 @@ const handleSend = async (messageContent: { text: string; files: any[]; rawFiles
                 (content: string, reasoning: string, tokens: string, speed: string) => {
                     chatStore.updateLastMessage(content, reasoning, tokens, speed)
                 },
-                () => {}
+                (phase: 'start' | 'done', name: string, extra: Record<string, unknown> | string | undefined) => {
+                    chatStore.recordAgentToolEvent(phase, name, extra as any)
+                },
             )
         } else {
             // 普通模式：走 /api/chat
@@ -238,7 +239,7 @@ onMounted(() => {
                     v-for="msg in currentMessages"
                     :key="msg.id"
                     :message="msg"
-                    v-memo="[msg.content, msg.reasoning_content, msg.loading, msg.ragSources]"
+                    v-memo="[msg.content, msg.reasoning_content, msg.loading, msg.ragSources, msg.agentToolTraceVersion]"
                 />
             </div>
 
@@ -256,7 +257,7 @@ onMounted(() => {
                     <DynamicScrollerItem
                         :item="item"
                         :active="active"
-                            :size-dependencies="[item.content, item.reasoning_content, item.ragSources]"
+                            :size-dependencies="[item.content, item.reasoning_content, item.ragSources, item.agentToolTraceVersion]"
                     >
                         <ChatMessage :message="item" />
                     </DynamicScrollerItem>

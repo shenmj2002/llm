@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { addDocument, listDocuments, deleteDocument, retrieveChunks } from './rag.js'
+import { rewriteAnswerInlineCitations } from './citationRewrite.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -118,6 +119,108 @@ function buildRagCitationPayload(chunks) {
   }))
 }
 
+/** 文末自动追加的「参考资料」Markdown（含 [n]，与 citations 编号一致，供前端 linkify） */
+function buildCitationAppendixMarkdown(chunks) {
+  if (!chunks?.length) return ''
+  const blocks = chunks.map((c, i) => {
+    const preview = (c.text || '').replace(/\s+/g, ' ').trim()
+    const short = preview.length > 240 ? `${preview.slice(0, 240)}…` : preview
+    return `[${i + 1}] **${c.docName || '文档'}**（ID: \`${(c.chunkId || '').slice(0, 28)}${(c.chunkId || '').length > 28 ? '…' : ''}\`）\n\n> ${short || '（空片段）'}`
+  })
+  return `\n\n---\n\n### 参考资料\n\n${blocks.join('\n\n')}\n`
+}
+
+/** 透传 SSE、累积正文；RAG 时二次调用接口生成句内 [n]，失败则文末附录兜底 */
+async function forwardStreamWithInlineCitationRewrite(upstreamRes, res, ctx) {
+  const { ragChunks, apiKey, model, userQuery } = ctx
+
+  if (!ragChunks?.length) {
+    const reader = upstreamRes.body.getReader()
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value?.length) res.write(Buffer.from(value))
+      }
+    } finally {
+      try {
+        reader.releaseLock()
+      } catch {
+        /**/
+      }
+    }
+    res.end()
+    return
+  }
+
+  const reader = upstreamRes.body.getReader()
+  const decoder = new TextDecoder()
+  let carry = ''
+  let aggregated = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      carry += decoder.decode(value || new Uint8Array(), { stream: !done })
+
+      while (carry.includes('\n')) {
+        const nl = carry.indexOf('\n')
+        const lineBuf = carry.slice(0, nl)
+        carry = carry.slice(nl + 1)
+
+        const lineNoLF = lineBuf.replace(/\r$/, '')
+        res.write(`${lineBuf}\n`)
+
+        if (lineNoLF.startsWith('data:')) {
+          const raw = lineNoLF.slice(5).trimStart()
+          if (raw !== '[DONE]') {
+            try {
+              const j = JSON.parse(raw)
+              aggregated += j.choices?.[0]?.delta?.content ?? ''
+            } catch {
+              /**/
+            }
+          }
+        }
+      }
+      if (done) break
+    }
+    if (carry) res.write(carry)
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /**/
+    }
+  }
+
+  const draft = aggregated.trimEnd()
+  if (draft.length > 0) {
+    try {
+      const out = await rewriteAnswerInlineCitations({
+        chatUrl: SILICONFLOW_URL,
+        apiKey,
+        model,
+        userQuery: userQuery || '',
+        ragChunks,
+        assistantPlainText: draft,
+      })
+      if (out?.length >= 20) {
+        res.write(`data: ${JSON.stringify({ type: 'answer_citations', content: out })}\n\n`)
+      } else throw new Error('rewrite too short')
+    } catch (err) {
+      console.warn('[RAG inline citations] appendix fallback:', err?.message || err)
+      const appendix = buildCitationAppendixMarkdown(ragChunks)
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: appendix } }] })}\n\n`)
+    }
+  } else if (ragChunks.length > 0) {
+    const appendix = buildCitationAppendixMarkdown(ragChunks)
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: appendix } }] })}\n\n`)
+  }
+
+  res.end()
+}
+
 app.post('/api/chat', async (req, res) => {
   const apiKey = process.env.LLM_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'LLM_API_KEY is not set in .env' })
@@ -125,18 +228,20 @@ app.post('/api/chat', async (req, res) => {
   try {
     let { ragEnabled, ...llmPayload } = req.body
     let ragChunks = []  // 保存检索到的 chunks，用于后续注入前端
+    /** RAG / 引用重写用：上一轮用户检索查询文本（含多模态时仅 text） */
+    let lastQueryForCitation = ''
 
     // RAG 检索：把相关内容注入 system prompt
     if (ragEnabled) {
       const userMessages = llmPayload.messages.filter(m => m.role === 'user')
       const rawContent = userMessages[userMessages.length - 1]?.content || ''
       // content 可能是字符串（普通消息）或数组（多模态消息），只取文字部分做检索
-      const lastUserQuery = Array.isArray(rawContent)
+      lastQueryForCitation = Array.isArray(rawContent)
         ? rawContent.filter(p => p.type === 'text').map(p => p.text || '').join('\n')
         : rawContent
 
-      if (lastUserQuery) {
-        ragChunks = await retrieveChunks(lastUserQuery, apiKey)
+      if (lastQueryForCitation) {
+        ragChunks = await retrieveChunks(lastQueryForCitation, apiKey)
         if (ragChunks.length > 0) {
           const context = ragChunks
             .map(
@@ -146,7 +251,7 @@ app.post('/api/chat', async (req, res) => {
             .join('\n\n')
           const systemMessage = {
             role: 'system',
-            content: `你是一个知识库助手，请优先基于以下参考资料作答；资料没有的再结合自身知识简要说明。\n\n引用格式（必须严格遵守）：陈述来自参考资料的事实时，在该句末尾或紧随其后使用方括号编号，如 [1]、[2]，编号必须与下方「参考资料」条目前的 [n] 一致，不要编造编号；同一句可连用多个编号如 [1][2]。不要使用脚注链接或 JSON，只用正文 Markdown + [n]。\n\n参考资料：\n${context}`,
+            content: `你是一个知识库助手。请优先依据下方「参考资料」推理并作答；资料未覆盖处可结合常识简要说明。\n\n严格要求：正文中禁止写出引用标记（不要使用 [1]、[2] 或【1】等），只输出连贯、可读的正文（可使用 Markdown）。参考资料仅帮助你组织措辞与事实。\n服务端会在完成后根据草稿与检索结果自动编排正文引用；若编排失败仅在文末附上参考资料节选。\n\n参考资料：\n${context}`,
           }
           llmPayload.messages = [systemMessage, ...llmPayload.messages]
         }
@@ -181,18 +286,39 @@ app.post('/api/chat', async (req, res) => {
         const citations = buildRagCitationPayload(ragChunks)
         res.write(`data: ${JSON.stringify({ type: 'rag_sources', sources: citations, citations })}\n\n`)
       }
-      upstream.body.pipeTo(
-        new WritableStream({
-          write(chunk) { res.write(chunk) },
-          close() { res.end() },
-          abort(err) { res.destroy(err) },
-        })
-      )
+      forwardStreamWithInlineCitationRewrite(upstream, res, {
+        ragChunks,
+        apiKey,
+        model: llmPayload.model,
+        userQuery: lastQueryForCitation,
+      }).catch((err) => {
+        console.error('[/api/chat] stream forward:', err)
+        if (!res.writableEnded) res.destroy(err)
+      })
     } else {
       const data = await upstream.json()
-      // 非流式：RAG 来源附在响应体里
       if (ragChunks.length > 0) {
         data.rag_sources = buildRagCitationPayload(ragChunks)
+        const msg = data.choices?.[0]?.message
+        if (msg && typeof msg.content === 'string' && msg.content.trim()) {
+          try {
+            const out = await rewriteAnswerInlineCitations({
+              chatUrl: SILICONFLOW_URL,
+              apiKey,
+              model: llmPayload.model,
+              userQuery: lastQueryForCitation || '',
+              ragChunks,
+              assistantPlainText: msg.content.trim(),
+            })
+            if (out?.length >= 20) msg.content = out
+            else msg.content += buildCitationAppendixMarkdown(ragChunks)
+          } catch (e) {
+            console.warn('[RAG inline citations]', e?.message || e)
+            msg.content += buildCitationAppendixMarkdown(ragChunks)
+          }
+        } else if (msg && typeof msg.content === 'string') {
+          msg.content += buildCitationAppendixMarkdown(ragChunks)
+        }
       }
       res.json(data)
     }
