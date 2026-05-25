@@ -2,11 +2,10 @@
 import { Document, Loading, Sunny, ArrowDown, Tools } from '@element-plus/icons-vue'
 import { ref, computed, watch, onUnmounted, nextTick } from "vue";
 import MarkdownContent from '@/markdown/components/MarkdownContent.vue'
-import { useMarkdown } from '@/markdown/useMarkdown'
+import { useMarkdown, useStreamingMarkdown } from '@/markdown/useMarkdown'
 import copyIcon from '@/assets/photo/复制.png'
 
 const { renderMarkdown } = useMarkdown()
-
 
 //props父组件传递到子组件,传递message这个参数
 const props = defineProps({
@@ -15,6 +14,25 @@ const props = defineProps({
         default: " "
     }
 })
+
+const messageContent = computed(() => props.message.content || '')
+const messageReasoning = computed(() => props.message.reasoning_content || '')
+const isStreaming = computed(() => props.message.loading === true)
+
+/** 正文：buffer + 50ms 节流后再交给 MarkdownContent 解析 */
+const { displayContent: throttledContent } = useStreamingMarkdown(
+    messageContent,
+    isStreaming,
+    { throttleMs: 50 },
+)
+
+/** 深度思考：同样节流后再 md.render */
+const { displayContent: throttledReasoning } = useStreamingMarkdown(
+    messageReasoning,
+    isStreaming,
+    { throttleMs: 50 },
+)
+const renderedReasoning = computed(() => renderMarkdown(throttledReasoning.value))
 
 function maxCitationIndex(sources: unknown[] | undefined): number {
     if (!sources?.length) return 0
@@ -185,50 +203,7 @@ function onCitationBubbleKeyDown(e: KeyboardEvent) {
     toggleCitePopover(id, el as HTMLElement)
 }
 
-// 流式时防抖合并 chunk；MarkdownContent / v-html 接收 debounced 文本
-const debouncedContent = ref('')
-const renderedReasoning = ref('')
-
-let contentTimer: ReturnType<typeof setTimeout> | null = null
-let reasoningTimer: ReturnType<typeof setTimeout> | null = null
-
-watch(
-    () => [props.message.content, props.message.loading] as const,
-    ([content, loading]) => {
-        if (contentTimer) clearTimeout(contentTimer)
-        if (!loading) {
-            debouncedContent.value = content || ''
-        } else {
-            contentTimer = setTimeout(() => {
-                debouncedContent.value = content || ''
-            }, 80)
-        }
-    },
-    { immediate: true },
-)
-
-watch(
-    () => [props.message.reasoning_content, props.message.loading] as const,
-    ([reasoning, loading]) => {
-        if (!reasoning) {
-            renderedReasoning.value = ''
-            return
-        }
-        if (reasoningTimer) clearTimeout(reasoningTimer)
-        if (!loading) {
-            renderedReasoning.value = renderMarkdown(reasoning)
-        } else {
-            reasoningTimer = setTimeout(() => {
-                renderedReasoning.value = renderMarkdown(reasoning)
-            }, 80)
-        }
-    },
-    { immediate: true },
-)
-
 onUnmounted(() => {
-    if (contentTimer) clearTimeout(contentTimer)
-    if (reasoningTimer) clearTimeout(reasoningTimer)
     citePopoverDocCleanup?.()
     closeCitePopover()
 })
@@ -334,7 +309,7 @@ const handleCopy = async () => {
                 @keydown="onCitationBubbleKeyDown"
             >
                 <MarkdownContent
-                    :content="debouncedContent"
+                    :content="throttledContent"
                     :max-citation="maxCitation"
                 />
             </div>

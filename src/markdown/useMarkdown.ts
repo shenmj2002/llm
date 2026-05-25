@@ -2,6 +2,9 @@ import { md } from './parser'
 import { parseMarkdownBlocks } from './blocks'
 import { sanitizeHtml } from './sanitize'
 
+export { useStreamingMarkdown } from './useStreamingMarkdown'
+export type { UseStreamingMarkdownOptions } from './useStreamingMarkdown'
+
 /** 统一 Markdown 解析能力 */
 export function useMarkdown() {
   const renderMarkdown = (text: string) => {
