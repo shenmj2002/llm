@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Document, Loading, Sunny, ArrowDown, Tools } from '@element-plus/icons-vue'
-import { ref, computed, watch, onUnmounted, onMounted, nextTick } from "vue";
-import { rederMarkdown } from "@/utils/markdown";
-import { linkifyCitationMarkers } from "@/utils/citationMarkup";
+import { ref, computed, watch, onUnmounted, nextTick } from "vue";
+import MarkdownContent from '@/markdown/components/MarkdownContent.vue'
+import { useMarkdown } from '@/markdown/useMarkdown'
 import copyIcon from '@/assets/photo/复制.png'
+
+const { renderMarkdown } = useMarkdown()
 
 
 //props父组件传递到子组件,传递message这个参数
@@ -22,13 +24,9 @@ function maxCitationIndex(sources: unknown[] | undefined): number {
     )
 }
 
-/** 正文 Markdown → HTML，若有 RAG 来源则把 [n] 转成可点击锚点（不触碰 <pre> 内文本） */
-function markdownToBubbleHtml(markdown: string) {
-    const raw = rederMarkdown(markdown || '')
-    const max = maxCitationIndex(props.message.ragSources as unknown[] | undefined)
-    if (max < 1) return raw
-    return linkifyCitationMarkers(raw, max)
-}
+const maxCitation = computed(() =>
+    maxCitationIndex(props.message.ragSources as unknown[] | undefined),
+)
 
 function citationDisplayId(source: Record<string, unknown>, index: number) {
     const id = source.citationId
@@ -187,45 +185,45 @@ function onCitationBubbleKeyDown(e: KeyboardEvent) {
     toggleCitePopover(id, el as HTMLElement)
 }
 
-// 用 ref 手动存储渲染结果，配合防抖实现 chunk 合并渲染
-const renderedContent = ref('')
+// 流式时防抖合并 chunk；MarkdownContent / v-html 接收 debounced 文本
+const debouncedContent = ref('')
 const renderedReasoning = ref('')
 
 let contentTimer: ReturnType<typeof setTimeout> | null = null
 let reasoningTimer: ReturnType<typeof setTimeout> | null = null
 
-// content：流式时 80ms 内多次更新只渲染最新值（合并 chunk）
-// 消息加载完成（loading=false）时立刻强制渲染一次保证最终内容完整
 watch(
-    () => [props.message.content, props.message.loading, props.message.ragSources] as const,
+    () => [props.message.content, props.message.loading] as const,
     ([content, loading]) => {
         if (contentTimer) clearTimeout(contentTimer)
         if (!loading) {
-            renderedContent.value = markdownToBubbleHtml(content || '')
+            debouncedContent.value = content || ''
         } else {
             contentTimer = setTimeout(() => {
-                renderedContent.value = markdownToBubbleHtml(content || '')
+                debouncedContent.value = content || ''
             }, 80)
         }
     },
-    { immediate: true }
+    { immediate: true },
 )
 
-// reasoning 同理
 watch(
     () => [props.message.reasoning_content, props.message.loading] as const,
     ([reasoning, loading]) => {
-        if (!reasoning) { renderedReasoning.value = ''; return }
+        if (!reasoning) {
+            renderedReasoning.value = ''
+            return
+        }
         if (reasoningTimer) clearTimeout(reasoningTimer)
         if (!loading) {
-            renderedReasoning.value = rederMarkdown(reasoning)
+            renderedReasoning.value = renderMarkdown(reasoning)
         } else {
             reasoningTimer = setTimeout(() => {
-                renderedReasoning.value = rederMarkdown(reasoning)
+                renderedReasoning.value = renderMarkdown(reasoning)
             }, 80)
         }
     },
-    { immediate: true }
+    { immediate: true },
 )
 
 onUnmounted(() => {
@@ -243,67 +241,6 @@ const handleCopy = async () => {
         console.error('复制失败:', error)
     }
 }
-
-// 代码块的复制函数
-const handleCodeCopy = async (event: MouseEvent) => {
-    //event.target事件发生的元素，这里指<button>,为HTMLElement类型
-    const codeBlock = (event.target as HTMLElement).closest('.code-block')//向上查找最近的拥有.code-block 类名的元素
-    if (!codeBlock) return;
-    //querySelector：向下找，查找第一个匹配指定 CSS 选择器的元素
-    const codeElement = codeBlock.querySelector('code');//在找到的代码块容器中，查找 <code> 标签
-    if (!codeElement) return;
-    //'':确保 code 变量是字符串类型，避免 null、undefined
-    const code = codeElement.textContent || ''//获取<code> 标签代码内容
-    try {
-        await navigator.clipboard.writeText(code)
-    } catch (err) {
-        console.error('复制失败:', err)
-    }
-}
-
-
-//生命周期函数：组件渲染完后给每个codeblock添加复制事件
-onMounted(() => {
-    //创建WeakMap实例，储存已经绑定的复制按钮元素，键为HTMLElement类型，值为boolean类型
-    //键为复制按钮元素，值为true或false
-    const listenerMap = new WeakMap<HTMLElement, boolean>();
-    // 创建MutationObserver实例，用于监听新增的节点,mutations:回调函数得到的突变数组
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            //检查是否有新增的DOM节点，mutation.addedNodes.length：新增节点的长度
-            if (mutation.addedNodes.length) {
-                //查找页面中所有拥有 .code-block 类名的元素
-                const codeBlocks = document.querySelectorAll('.code-block')
-                codeBlocks.forEach((block) => {
-                    //查找block下data-action="copy"的元素
-                    const copyBtn = block.querySelector('[data-action="copy"]') as HTMLElement | null;
-                    //如果找到了复制按钮，并且该按钮还没有被标记为已添加事件监听器
-                    if (copyBtn && !listenerMap.has(copyBtn as HTMLElement)) {
-                        //给复制按钮添加点击事件监听器，addEventListener：为 DOM 元素绑定事件监听器
-                        copyBtn.addEventListener('click', handleCodeCopy)
-                        listenerMap.set(copyBtn as HTMLElement, true)
-                    }
-                })
-            }
-        })
-    })
-
-    // 开始观察
-    observer.observe(document.body, {
-        childList: true,//观察子节点的变化
-        subtree: true,//观察所有后代节点的变化
-    })
-
-    // 组件卸载时清理
-    onUnmounted(() => {
-        observer.disconnect()//停止 MutationObserver 的观察
-        const codeBlocks = document.querySelectorAll('.code-block')
-        codeBlocks.forEach((block) => {
-            const copyBtn = block.querySelector('[data-action="copy"]')as HTMLElement | null;
-            copyBtn?.removeEventListener('click', handleCodeCopy)
-        })
-    })
-})
 
 </script>
 
@@ -391,10 +328,16 @@ onMounted(() => {
                 点击下方回复中的 <span class="cite-hint-mark">[编号]</span> 可就地查看参考依据摘要（再次点击同一编号、按 Esc、或点击空白处均可关闭）。
             </p>
             <!--content消息内容  -->
-            <div class="bubble" v-html="renderedContent"
+            <div
+                class="bubble"
                 @click="onCitationBubbleClick"
                 @keydown="onCitationBubbleKeyDown"
-            ></div>
+            >
+                <MarkdownContent
+                    :content="debouncedContent"
+                    :max-citation="maxCitation"
+                />
+            </div>
 
             <Teleport to="body">
                 <div
@@ -691,204 +634,22 @@ onMounted(() => {
 
             // 处理内部行内代码的样式
             :deep(code:not(.code-block *):not(.hljs *)):not([class*="language-"]) {
-                background-color: #f0f0f0; // 代码块的背景色
-                padding: 2px 4px; // 代码块的内边距
-                border-radius: 3px; // 圆角边框
-                font-size: 0.9em; // 代码字体稍小
-            }
-
-            :deep(.code-block) {
-                .code-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 0.5rem 1rem;
-                    background-color: var(--code-header-bg);
-
-                    .code-lang {
-                        font-size: 0.875rem;
-                        color: var(--code-lang-text);
-                        font-family: var(--code-font-family);
-                    }
-
-                    .code-action-btn {
-                        width: 1.5rem;
-                        height: 1.5rem;
-                        padding: 0;
-                        border: none;
-                        background: none;
-                        cursor: pointer;
-                        border-radius: 4px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        transition: background-color 0.2s;
-
-                        img {
-                            width: 1rem;
-                            height: 1rem;
-                            opacity: 1;
-                        }
-
-                        &:hover {
-                            background-color: var(--code-header-button-hover-bg);
-                        }
-                    }
-
-                }
-
-
-                .hljs {
-                    margin: 0 !important;
-                    padding: 1rem;
-                    background-color: var(--code-block-bg);
-                    overflow-x: auto; // 添加横向滚动
-                    white-space: pre; // 保留原始空白，禁止自动换行
-
-                    code {
-                        white-space: pre; // 保留原始空白，禁止自动换行
-                    }
-                }
+                background-color: #f0f0f0;
+                padding: 2px 4px;
+                border-radius: 3px;
+                font-size: 0.9em;
             }
         }
 
         .bubble {
-            width: 100%; // 占满容器宽度
+            width: 100%;
             padding: 0.75rem 1rem;
-            background-color: #ffffff; //AI助手消息背景色
+            background-color: #ffffff;
             border-radius: 1rem;
             font-size: 1rem;
             line-height: 1.5;
-            word-break: break-word; //长文本自动换行 
+            word-break: break-word;
             overflow: hidden;
-
-            :deep(.code-block) {
-                margin: 0.5rem 0;
-                border: 1px solid var(--code-border);
-                border-radius: 0.5rem;
-                overflow: hidden;
-                width: 100%;
-
-                pre {
-                    margin: 0 !important;
-                }
-
-                .code-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 0.5rem 1rem;
-                    background-color: var(--code-header-bg);
-
-                    .code-lang {
-                        font-size: 0.875rem;
-                        color: var(--code-lang-text);
-                        font-family: var(--code-font-family);
-                    }
-
-                    .code-action-btn {
-                        width: 1.5rem;
-                        height: 1.5rem;
-                        padding: 0;
-                        border: none;
-                        background: none;
-                        cursor: pointer;
-                        border-radius: 4px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        transition: all 0.2s;
-
-                        img {
-                            width: 1rem;
-                            height: 1rem;
-                            opacity: 1;
-                        }
-
-                        &:hover {
-                            background-color: var(--code-header-button-hover-bg);
-                        }
-                    }
-
-                }
-
-                .hljs {
-                    margin: 0 !important;
-                    padding: 1rem;
-                    background-color: var(--code-block-bg);
-                    overflow-x: auto; // 添加横向滚动
-                    white-space: pre; // 保留原始空白，禁止自动换行
-
-                    code {
-                        white-space: pre; // 保留原始空白，禁止自动换行
-                    }
-                }
-            }
-
-            :deep(p) {
-                margin: 0; // 移除段落默认边距
-            }
-
-            :deep(p+p) {
-                margin-bottom: 0.5rem; // 段落之间保持间距，最后一个段落不需要
-            }
-
-            //行内代码样式
-            :deep(code:not(.code-block *):not(.hljs *):not([class*="language-"])) {
-                font-family: var(--code-font-family); // 使用等宽字体
-                padding: 0.2em 0.4em;
-                border-radius: 0.25rem;
-                background-color: #f0f0f0;
-            }
-
-            // 列表样式
-            :deep(ul) {
-                :deep(ol) {
-                    margin: 0.5rem 0;
-                    padding-left: 1.5rem;
-                }
-            }
-
-            // 引用块样式
-            :deep(blockquote) {
-                margin: 0.5rem 0;
-                padding-left: 1rem;
-                border-left: 4px solid var(--border-color); // 左侧边框
-                color: var(--text-color-secondary); // 使用次要文本颜色
-            }
-
-            // 表格样式
-            :deep(table) {
-                border-collapse: collapse; // 合并边框
-                margin: 0.5rem 0;
-                width: 100%;
-
-                th,
-                td {
-                    border: 1px solid var(--border-color); // 单元格边框
-                    padding: 0.5rem;
-                }
-
-                th {
-                    background-color: var(--code-header-bg); // 表头背景色
-                }
-            }
-
-            // 链接样式
-            :deep(a) {
-                color: #3f7af1; // 链接颜色
-                text-decoration: none;
-
-                &:hover {
-                    text-decoration: underline; // 悬停时显示下划线
-                }
-            }
-
-            // 图片样式
-            :deep(img) {
-                max-width: 100%; // 限制最大宽度
-                border-radius: 0.5rem; // 圆角
-            }
 
             // 行内引用 [n]，点击就地弹出参考摘要
             :deep(.cite-ref) {
