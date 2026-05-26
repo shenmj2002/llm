@@ -1,0 +1,62 @@
+.markdown-body {
+  width: 100%;
+
+  .markdown-html {
+    p {
+      margin: 0;
+    }
+
+    p + p {
+      margin-bottom: 0.5rem;
+    }
+
+    code:not(.hljs *):not([class*='language-']) {
+      font-family: var(--code-font-family, ui-monospace, monospace);
+      padding: 0.2em 0.4em;
+      border-radius: 0.25rem;
+      background-color: #f0f0f0;
+    }
+
+    ul,
+    ol {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+    }
+
+    blockquote {
+      margin: 0.5rem 0;
+      padding-left: 1rem;
+      border-left: 4px solid var(--border-color, #e2e8f0);
+      color: var(--text-color-secondary, #64748b);
+    }
+
+    a,
+    .md-link {
+      color: #3f7af1;
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    img {
+      max-width: 100%;
+      border-radius: 0.5rem;
+    }
+
+    .cite-ref {
+      cursor: pointer;
+      color: var(--primary-color, #3b82f6);
+      font-weight: 600;
+      text-decoration: underline dotted;
+      text-underline-offset: 2px;
+    }
+
+    .cite-ref:focus {
+      outline: 2px solid var(--primary-color, #93c5fd);
+      outline-offset: 1px;
+      border-radius: 2px;
+    }
+  }
+}

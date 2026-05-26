@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { Document, Loading, Sunny, ArrowDown, Tools } from '@element-plus/icons-vue'
 import { ref, computed, watch, onUnmounted, nextTick } from "vue";
-import MarkdownContent from '@/markdown/components/MarkdownContent.vue'
-import { useMarkdown, useStreamingMarkdown } from '@/markdown/useMarkdown'
+import { useMarkdown, useStreamingMarkdown, useMarkdownBody } from '@/markdown/useMarkdown'
+import CodeBlock from '@/markdown/components/CodeBlock.vue'
+import Table from '@/markdown/components/Table.vue'
 import copyIcon from '@/assets/photo/复制.png'
 
 const { renderMarkdown } = useMarkdown()
@@ -19,21 +20,6 @@ const messageContent = computed(() => props.message.content || '')
 const messageReasoning = computed(() => props.message.reasoning_content || '')
 const isStreaming = computed(() => props.message.loading === true)
 
-/** 正文：buffer + 50ms 节流后再交给 MarkdownContent 解析 */
-const { displayContent: throttledContent } = useStreamingMarkdown(
-    messageContent,
-    isStreaming,
-    { throttleMs: 50 },
-)
-
-/** 深度思考：同样节流后再 md.render */
-const { displayContent: throttledReasoning } = useStreamingMarkdown(
-    messageReasoning,
-    isStreaming,
-    { throttleMs: 50 },
-)
-const renderedReasoning = computed(() => renderMarkdown(throttledReasoning.value))
-
 function maxCitationIndex(sources: unknown[] | undefined): number {
     if (!sources?.length) return 0
     return Math.max(
@@ -45,6 +31,26 @@ function maxCitationIndex(sources: unknown[] | undefined): number {
 const maxCitation = computed(() =>
     maxCitationIndex(props.message.ragSources as unknown[] | undefined),
 )
+
+/** 正文：buffer + 50ms 节流后再切块渲染 */
+const { displayContent: throttledContent } = useStreamingMarkdown(
+    messageContent,
+    isStreaming,
+    { throttleMs: 50 },
+)
+
+const { blocks: markdownBlocks, renderHtmlBlock } = useMarkdownBody(
+    throttledContent,
+    maxCitation,
+)
+
+/** 深度思考：同样节流后再 md.render */
+const { displayContent: throttledReasoning } = useStreamingMarkdown(
+    messageReasoning,
+    isStreaming,
+    { throttleMs: 50 },
+)
+const renderedReasoning = computed(() => renderMarkdown(throttledReasoning.value))
 
 function citationDisplayId(source: Record<string, unknown>, index: number) {
     const id = source.citationId
@@ -308,10 +314,24 @@ const handleCopy = async () => {
                 @click="onCitationBubbleClick"
                 @keydown="onCitationBubbleKeyDown"
             >
-                <MarkdownContent
-                    :content="throttledContent"
-                    :max-citation="maxCitation"
-                />
+                <div class="markdown-body">
+                    <template v-for="(block, index) in markdownBlocks" :key="index">
+                        <CodeBlock
+                            v-if="block.type === 'code'"
+                            :lang="block.lang"
+                            :code="block.code"
+                        />
+                        <Table
+                            v-else-if="block.type === 'table'"
+                            :html="renderHtmlBlock(block.html)"
+                        />
+                        <div
+                            v-else
+                            class="markdown-html"
+                            v-html="renderHtmlBlock(block.html)"
+                        />
+                    </template>
+                </div>
             </div>
 
             <Teleport to="body">
@@ -767,4 +787,8 @@ const handleCopy = async () => {
         }
     }
 }
+</style>
+
+<style lang="scss">
+@import '@/markdown/markdown-body.scss';
 </style>

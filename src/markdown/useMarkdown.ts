@@ -4,6 +4,7 @@ import { sanitizeHtml } from './sanitize'
 
 export { useStreamingMarkdown } from './useStreamingMarkdown'
 export type { UseStreamingMarkdownOptions } from './useStreamingMarkdown'
+export { useMarkdownBody } from './useMarkdownBody'
 
 /** 统一 Markdown 解析能力 */
 export function useMarkdown() {
