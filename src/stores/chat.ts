@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'//定义一个store
+import type { ChartResult, PendingTableDraft } from '@/types/tableDraft'
 
 
 // RAG 引用（结构化 citations；兼容旧消息的 docName + text）
@@ -40,6 +41,11 @@ interface Message {
     loading?: boolean;        // 流式输出中为 true，结束后置 false
     ragSources?: RagSource[]; // RAG 检索到的引用来源
     agentToolCalls?: AgentToolCallRecord[];
+    pendingTableDraft?: PendingTableDraft;
+    chartResult?: ChartResult;
+    awaitingUserConfirmation?: boolean;
+    chartConfirming?: boolean;
+    chartError?: string;
     /** 每次追加/完结一条工具轨迹时递增，供 v-memo 感知「同上一条数，但状态已变」 */
     agentToolTraceVersion?: number;
 }
@@ -121,6 +127,10 @@ export const useChatStore = defineStore('llm-chat',
             }
         }
 
+        const getMessageById = (messageId: number) => {
+            return currentConversation.value?.messages.find((message) => message.id === messageId)
+        }
+
         // 设置最后一条消息的 loading 状态
         const setLastMessageLoading = (value: boolean) => {
             const msgs = currentConversation.value?.messages
@@ -131,6 +141,103 @@ export const useChatStore = defineStore('llm-chat',
         const setLastMessageSources = (sources: RagSource[]) => {
             const msgs = currentConversation.value?.messages
             if (msgs?.length) msgs[msgs.length - 1].ragSources = sources
+        }
+
+        const setLastMessageTableDraft = (draft: PendingTableDraft) => {
+            const msgs = currentConversation.value?.messages
+            if (!msgs?.length) return
+            const lastMessage = msgs[msgs.length - 1]
+            lastMessage.pendingTableDraft = draft
+            lastMessage.awaitingUserConfirmation = true
+            lastMessage.chartConfirming = false
+            lastMessage.chartError = ''
+        }
+
+        const updateMessageTableDraft = (messageId: number, draft: PendingTableDraft) => {
+            const target = getMessageById(messageId)
+            if (!target) return
+            target.pendingTableDraft = {
+                ...draft,
+                columns: [...draft.columns],
+                rows: draft.rows.map(row => ({
+                    ...row,
+                    cells: { ...row.cells },
+                })),
+            }
+            target.awaitingUserConfirmation = true
+            target.chartError = ''
+        }
+
+        const setLastMessageAwaitingConfirmation = (value: boolean, content?: string) => {
+            const msgs = currentConversation.value?.messages
+            if (!msgs?.length) return
+            const lastMessage = msgs[msgs.length - 1]
+            lastMessage.awaitingUserConfirmation = value
+            if (typeof content === 'string' && content) {
+                lastMessage.content = content
+            }
+        }
+
+        const setMessageChartConfirming = (messageId: number, value: boolean) => {
+            const target = getMessageById(messageId)
+            if (!target) return
+            target.chartConfirming = value
+            if (value) target.chartError = ''
+        }
+
+        const setMessageChartResult = (messageId: number, chart: ChartResult) => {
+            const target = getMessageById(messageId)
+            if (!target) return
+            target.chartResult = chart
+            target.awaitingUserConfirmation = false
+            target.chartConfirming = false
+            target.chartError = ''
+        }
+
+        const setMessageChartError = (messageId: number, error: string) => {
+            const target = getMessageById(messageId)
+            if (!target) return
+            target.chartConfirming = false
+            target.chartError = error
+        }
+
+        const recoverTransientState = () => {
+            isLoading.value = false
+
+            for (const conversation of conversations.value) {
+                for (const message of conversation.messages) {
+                    if (message.loading) {
+                        message.loading = false
+                    }
+
+                    if (message.chartConfirming) {
+                        message.chartConfirming = false
+                    }
+
+                    if (message.agentToolCalls?.length) {
+                        message.agentToolCalls = message.agentToolCalls.map(tool => (
+                            tool.status === 'running'
+                                ? {
+                                    ...tool,
+                                    status: 'done',
+                                    result: tool.result || '上一次工具执行已中断，请重新生成。',
+                                }
+                                : tool
+                        ))
+                    }
+
+                    const looksInterruptedAssistantMessage =
+                        message.role === 'assistant'
+                        && !message.content?.trim()
+                        && !message.reasoning_content?.trim()
+                        && !message.pendingTableDraft
+                        && Boolean(message.agentToolCalls?.length)
+
+                    if (looksInterruptedAssistantMessage) {
+                        message.content = '上一次生成未完成，请重新发送消息或重新生成表格草稿。'
+                    }
+                }
+            }
         }
 
         /** Agent 模式下记录 MCP tool_start / tool_done（新数组赋值，便于 v-memo 与视图刷新） */
@@ -243,7 +350,14 @@ export const useChatStore = defineStore('llm-chat',
             updateTitleFromMessage,
             setLastMessageLoading,
             setLastMessageSources,
+            setLastMessageTableDraft,
+            updateMessageTableDraft,
+            setLastMessageAwaitingConfirmation,
+            setMessageChartConfirming,
+            setMessageChartResult,
+            setMessageChartError,
             recordAgentToolEvent,
+            recoverTransientState,
         }// 暴露状态供组件使用
     },
     {

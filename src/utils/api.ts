@@ -1,5 +1,6 @@
 //网络请求
 import { useSettingStore } from "@/stores/settings.ts"
+import type { PendingTableDraft } from "@/types/tableDraft"
 
 
 // 多模态内容块（图片或文本）
@@ -47,7 +48,9 @@ export const createChatCompletion = async (messages:sendMessage[]) => {
         
         //检查是否错误
         if(!response.ok){
-            throw new Error ("HTTP error! status: " + response.status)
+            const errorBody = await response.json().catch(() => null)
+            const detail = errorBody?.detail || errorBody?.error || ''
+            throw new Error(detail ? `HTTP error! status: ${response.status} - ${detail}` : "HTTP error! status: " + response.status)
         }
         //判断是否需要流式响应
         if (settingStore.settings.stream){
@@ -86,4 +89,38 @@ export const createAgentCompletion = async (messages: sendMessage[]) => {
         throw new Error('Agent API error: ' + response.status)
     }
     return response
+}
+
+export const confirmAgentTableChart = async (payload: {
+    conversationId: string
+    messageId: number
+    sessionToken: string
+    tablePayload: PendingTableDraft
+    chartStyleRequest?: string
+    model?: string
+}) => {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 45000)
+
+    try {
+        const response = await fetch('/api/agent/table-chart/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        })
+
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+            throw new Error(data.error || `Confirm API error: ${response.status}`)
+        }
+        return data
+    } catch (error: any) {
+        if (error?.name === 'AbortError') {
+            throw new Error('确认生成折线图超时，请检查后端服务后重试。')
+        }
+        throw error
+    } finally {
+        window.clearTimeout(timeoutId)
+    }
 }

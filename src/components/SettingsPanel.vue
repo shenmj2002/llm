@@ -34,7 +34,7 @@ defineExpose({ openDrawer })
 
 <template>
   <!--el-drawer:侧边栏抽屉  v-model:是否显示 Drawer -->
-  <el-drawer v-model="drawer" title="设置" size=350px>
+  <el-drawer v-model="drawer" title="设置" size="380px" class="settings-drawer">
 
     <!-- Model -->
     <div class="setting-item">
@@ -153,7 +153,7 @@ defineExpose({ openDrawer })
       </div>
       <el-button
         size="small"
-        style="margin-top: 10px; width: 100%"
+        class="full-width-btn"
         @click="openRagPanel"
       >
         管理知识库文档
@@ -165,14 +165,14 @@ defineExpose({ openDrawer })
       <div class="for-inline">
         <div class="name-label">
           <span>Agent 模式 (MCP)</span>
-          <el-tooltip content="开启后 AI 可自动调用工具（查时间、检索知识库等），开启时 RAG 开关无效" placement="top">
+          <el-tooltip content="开启后 AI 可自动调用工具（如查询当前时间），开启时 RAG 开关无效" placement="top">
             <el-icon><QuestionFilled /></el-icon>
           </el-tooltip>
         </div>
         <el-switch v-model="settingStore.settings.agentEnabled" />
       </div>
       <div v-if="settingStore.settings.agentEnabled" class="agent-tools-tip">
-        <div>可用工具：获取当前时间、知识库检索</div>
+        <div>可用工具：获取当前时间</div>
         <div style="margin-top:4px;color:#e6a23c;">⚠️ 请选择支持工具调用的模型，如 DeepSeek-V3、Qwen3 系列（标注「工具调用」的选项）</div>
       </div>
     </div>
@@ -182,29 +182,83 @@ defineExpose({ openDrawer })
 </template>
 
 <style scoped lang="scss">
+:deep(.el-drawer) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(244, 248, 255, 0.96) 100%);
+}
+
+:deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 22px 24px 8px;
+  color: var(--text-color-primary);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+:deep(.el-drawer__body) {
+  padding: 8px 10px 24px;
+}
+
+:deep(.el-select__wrapper),
+:deep(.el-input__wrapper) {
+  min-height: 44px;
+  border-radius: 14px;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+:deep(.el-slider__runway) {
+  height: 8px;
+}
+
+:deep(.el-slider__button) {
+  width: 16px;
+  height: 16px;
+}
+
 .setting-item {
-  margin: 20px;
+  margin: 14px 14px 18px;
+  padding: 18px;
+  border: 1px solid rgba(116, 132, 160, 0.14);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: var(--shadow-sm);
 
   .name-label {
-    margin-top: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    color: var(--text-color-primary);
+    font-size: 14px;
+    font-weight: 600;
   }
 }
+
 .for-inline {
   display: flex;
   justify-content: space-between;
-  align-items: center;//弹性盒子垂直居中
+  align-items: center;
+  gap: 16px;
+
   a {
-    color: #3f7af1;
-    text-decoration: none//a标签:各种线；没有
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
   }
 }
+
 .agent-tools-tip {
-  margin-top: 8px;
+  margin-top: 12px;
   font-size: 12px;
-  color: #909399;
-  background: #f5f7fa;
-  padding: 6px 10px;
-  border-radius: 4px;
+  line-height: 1.6;
+  color: var(--text-color-secondary);
+  background: rgba(255, 247, 230, 0.8);
+  border: 1px solid rgba(230, 162, 60, 0.16);
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.full-width-btn {
+  margin-top: 10px;
+  width: 100%;
+  height: 42px;
+  border-radius: 14px;
 }
 </style>

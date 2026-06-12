@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Delete, UploadFilled } from '@element-plus/icons-vue'
+import { ref } from 'vue'
+import { Delete, Loading, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface RagDocument {
@@ -85,7 +85,7 @@ defineExpose({ openDrawer })
 </script>
 
 <template>
-  <el-drawer v-model="drawer" title="知识库管理" size="380px">
+  <el-drawer v-model="drawer" title="知识库管理" size="400px">
     <!-- 上传区域 -->
     <div class="rag-section">
       <el-upload
@@ -131,31 +131,70 @@ defineExpose({ openDrawer })
 </template>
 
 <style scoped lang="scss">
+:deep(.el-drawer) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(244, 248, 255, 0.96) 100%);
+}
+
+:deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 22px 24px 8px;
+  color: var(--text-color-primary);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+:deep(.el-drawer__body) {
+  padding: 8px 12px 24px;
+}
+
+:deep(.el-upload-dragger) {
+  border-radius: 20px;
+  border: 1px dashed rgba(91, 124, 255, 0.28);
+  background: rgba(255, 255, 255, 0.78);
+  transition: all 0.2s ease;
+}
+
+:deep(.el-upload-dragger:hover) {
+  border-color: rgba(91, 124, 255, 0.42);
+  background: rgba(91, 124, 255, 0.04);
+}
+
 .rag-section {
-  margin: 16px 20px;
+  margin: 14px 12px 18px;
+  padding: 18px;
+  border: 1px solid rgba(116, 132, 160, 0.14);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: var(--shadow-sm);
 
   .section-title {
     font-size: 13px;
-    color: #888;
-    margin-bottom: 10px;
+    color: var(--text-color-secondary);
+    margin-bottom: 12px;
+    font-weight: 600;
   }
 }
 
 .upload-icon {
   font-size: 40px;
-  color: #c0c4cc;
+  color: var(--primary-color);
   margin-bottom: 8px;
 }
 
 .upload-text {
   font-size: 14px;
-  color: #606266;
-  em { color: #409eff; font-style: normal; }
+  color: var(--text-color);
+
+  em {
+    color: var(--primary-color);
+    font-style: normal;
+    font-weight: 600;
+  }
 }
 
 .upload-hint {
   font-size: 12px;
-  color: #aaa;
+  color: var(--text-color-tertiary);
   margin-top: 4px;
 }
 
@@ -164,7 +203,7 @@ defineExpose({ openDrawer })
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #409eff;
+  color: var(--primary-color);
   margin-top: 10px;
 }
 
@@ -173,7 +212,7 @@ defineExpose({ openDrawer })
 
   .empty-tip {
     font-size: 13px;
-    color: #bbb;
+    color: var(--text-color-tertiary);
     text-align: center;
     padding: 20px 0;
   }
@@ -182,8 +221,8 @@ defineExpose({ openDrawer })
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(116, 132, 160, 0.12);
 
     &:last-child { border-bottom: none; }
 
@@ -195,16 +234,17 @@ defineExpose({ openDrawer })
 
       .doc-name {
         font-size: 14px;
-        color: #303133;
+        color: var(--text-color-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 260px;
+        font-weight: 600;
       }
 
       .doc-meta {
         font-size: 12px;
-        color: #aaa;
+        color: var(--text-color-secondary);
       }
     }
   }

@@ -146,47 +146,68 @@ const props = defineProps({
 
 <style scoped lang="scss">
 .chat-put {
-    background-color: #f0f4f9;
-    padding: 10px 20px;
-    border-radius: 50px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(243, 247, 255, 0.92) 100%);
+    padding: 14px 16px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 28px;
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(16px);
 
-    //文件预览区域
     .chat-put-preview {
-        margin-bottom: 8px; //与输入框的间距 
-        display: flex; //使用弹性布局 
-        flex-wrap: wrap; //允许多行显示
-        gap: 10px; //预览项之间的间距
+        margin-bottom: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
 
         .preview-item {
             display: flex;
-            position: relative;//为文件删除做准备
-            border-radius: 8px;
-            overflow: hidden; //隐藏超出部分
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(110, 127, 157, 0.18);
+            background: rgba(255, 255, 255, 0.82);
 
             .image-preview {
-                width: 60px;
-                height: 60px;
+                width: 76px;
+                height: 76px;
                 img {
                     width: 100%;
                     height: 100%;
+                    object-fit: cover;
                 }
             }
 
             .file-preview {
-                padding: 8px;
-                background-color: #f4f4f5;
+                min-width: 180px;
+                padding: 12px 14px;
+                background-color: rgba(255, 255, 255, 0.75);
                 border-radius: 8px;
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 10px;
+                color: var(--text-color);
+
+                .el-icon {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: var(--primary-soft);
+                    color: var(--primary-color);
+                    font-size: 18px;
+                }
+
                 .file-name {
                     max-width: 120px;
                     overflow: hidden;
-                    text-overflow: ellipsis; //超出显示省略号
-                    white-space: nowrap; //不换行
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    font-weight: 600;
                 }
                 .file-size {
-                    color: #909399;
+                    color: var(--text-color-secondary);
                     font-size: 12px;
                 }
             }
@@ -195,33 +216,46 @@ const props = defineProps({
                 position: absolute;
                 top: 4px;
                 right: 4px;
-                width: 20px;
-                height: 20px;
-                background-color: rgba(0, 0, 0, 0.5);//半透明黑色背景
+                width: 24px;
+                height: 24px;
+                background-color: rgba(15, 23, 42, 0.52);
                 border-radius: 50%;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                cursor: pointer; //鼠标变小手
+                cursor: pointer;
                 color: white;
                 &:hover {
-                    background-color: rgba(0, 0, 0, 0.7);
+                    background-color: rgba(15, 23, 42, 0.72);
                 }
             }
-
         }
     }
 
     .chat-put-input {
         display: flex;
-        //修改输入框textarea的样式
+        align-items: flex-end;
+        gap: 12px;
+
         :deep(.el-textarea__inner) {
             box-shadow: none;
             background-color: transparent;
+            border: none;
+            color: var(--text-color-primary);
+            min-height: 52px !important;
+            padding: 8px 0;
+            font-size: 15px;
+            line-height: 1.7;
+
+            &::placeholder {
+                color: var(--text-color-tertiary);
+            }
         }
 
         .chat-input-button {
             display: flex;
+            align-items: center;
+            gap: 8px;
 
             .upload-btn {
                 display: flex;
@@ -230,17 +264,46 @@ const props = defineProps({
             }
 
             .action-btn {
-                margin-left: 7px;
-                border: none;
-                background: none;
+                width: 42px;
+                height: 42px;
+                border: 1px solid rgba(116, 132, 160, 0.18);
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 0.82);
+                color: var(--text-color-secondary);
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                cursor: pointer;
+                transition: all 0.2s ease;
+
+                &:hover {
+                    transform: translateY(-1px);
+                    color: var(--primary-color);
+                    border-color: rgba(91, 124, 255, 0.24);
+                    background: rgba(91, 124, 255, 0.08);
+                }
             }
 
+            .action-btn:last-child {
+                width: 48px;
+                height: 48px;
+                border: none;
+                background: linear-gradient(135deg, var(--primary-color) 0%, #7893ff 100%);
+                color: #fff;
+                box-shadow: 0 16px 24px rgba(91, 124, 255, 0.24);
 
+                &:hover {
+                    background: linear-gradient(135deg, var(--primary-color-hover) 0%, #6986fb 100%);
+                }
+
+                &:disabled {
+                    cursor: not-allowed;
+                    opacity: 0.55;
+                    transform: none;
+                    box-shadow: none;
+                }
+            }
         }
-
     }
 }
 </style>

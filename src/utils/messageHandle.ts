@@ -1,5 +1,22 @@
 //messageHandle:将各种函数封装的对象,将得到的response进行处理
 export const messageHandle = {
+    // #region debug-point E:debug-reporter
+    reportDebugEvent(hypothesisId: string, location: string, msg: string, data: Record<string, unknown> = {}, runId = 'pre') {
+        fetch('http://127.0.0.1:7778/event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sessionId: 'mcp-empty-reply',
+                runId,
+                hypothesisId,
+                location,
+                msg,
+                data,
+                ts: Date.now(),
+            }),
+        }).catch(() => { })
+    },
+    // #endregion
     //创建标准格式的消息对象，loading 控制是否显示"生成中"状态
     formatMessage(role: "user" | "assistant", content: string, reasoning_content: string, files: File[], loading = false) {
         return {
@@ -111,6 +128,7 @@ export const messageHandle = {
         response: Response,
         updateCallback: Function,
         toolCallback: Function,
+        eventCallback?: Function,
     ) {
         const reader = response.body?.getReader()
         if (!reader) return
@@ -128,12 +146,21 @@ export const messageHandle = {
                 if (!line.startsWith('data:')) continue
                 try {
                     const event = JSON.parse(line.slice(5))
+                    // #region debug-point E:sse-event
+                    this.reportDebugEvent('E', 'src/utils/messageHandle.ts:handleAgentStream:event', '[DEBUG] Agent SSE event received', {
+                        eventType: event.type || '',
+                        hasStructuredResult: Boolean(event.structuredResult),
+                    })
+                    // #endregion
                     switch (event.type) {
                         case 'tool_start':
                             toolCallback('start', event.name, event.args)
                             break
                         case 'tool_done':
-                            toolCallback('done', event.name, event.result)
+                            toolCallback('done', event.name, event.structuredResult ?? event.result)
+                            if (event.structuredResult) {
+                                eventCallback?.('tool_done_structured', event.structuredResult)
+                            }
                             break
                         case 'token':
                             accContent += event.content || ''
@@ -148,7 +175,15 @@ export const messageHandle = {
                                 (totalTokens / ((Date.now() - startTime) / 1000)).toFixed(2),
                             )
                             break
+                        case 'awaiting_confirmation':
+                            eventCallback?.('awaiting_confirmation', event)
+                            break
                         case 'error':
+                            // #region debug-point E:sse-error
+                            this.reportDebugEvent('E', 'src/utils/messageHandle.ts:handleAgentStream:error', '[DEBUG] Agent SSE error event received', {
+                                message: event.message || '',
+                            })
+                            // #endregion
                             throw new Error(event.message || 'Agent error')
                     }
                 } catch (e: any) {
@@ -156,5 +191,11 @@ export const messageHandle = {
                 }
             }
         }
+        // #region debug-point E:sse-finished
+        this.reportDebugEvent('E', 'src/utils/messageHandle.ts:handleAgentStream:finished', '[DEBUG] Agent SSE reader finished', {
+            totalTokens,
+            contentLength: accContent.length,
+        })
+        // #endregion
     },
 }

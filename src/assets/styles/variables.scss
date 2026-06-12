@@ -1,22 +1,47 @@
 // :root 选择器通常用于定义全局 CSS 变量（也称为自定义属性）,整个文档中被引用和使用，可以通过 var() 函数来引用这些变量
 :root {
-  // 基础颜色
-  --text-color: #000000;
-  --text-color-secondary: #bbbfc4;
-  --sidebar-bg-color:#f0f4f9;
-  --bg-color: #ffffff;
-  --border-color: #c5c5c5;
+  // 品牌与文本
+  --primary-color: #7bb9ff;
+  --primary-color-hover: #69abf4;
+  --primary-soft: rgba(123, 185, 255, 0.14);
+  --accent-color: #9fd6ff;
+  --text-color-primary: #17314e;
+  --text-color: #294561;
+  --text-color-secondary: #6d87a5;
+  --text-color-tertiary: #9db0c7;
+
+  // 背景与卡片
+  --bg-color: #f5faff;
+  --bg-gradient:
+    radial-gradient(circle at top left, rgba(123, 185, 255, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(159, 214, 255, 0.18), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #f2f8ff 52%, #ebf4ff 100%);
+  --surface-color: rgba(255, 255, 255, 0.82);
+  --surface-color-strong: rgba(255, 255, 255, 0.94);
+  --surface-color-muted: #eef6ff;
+  --surface-elevated: #ffffff;
+  --sidebar-bg-color: rgba(255, 255, 255, 0.76);
+  --bubble-bg: rgba(255, 255, 255, 0.9);
+  --bubble-user-bg: linear-gradient(135deg, #eef6ff 0%, #f6fbff 100%);
+
+  // 边框与阴影
+  --border-color: rgba(135, 173, 215, 0.22);
+  --border-color-strong: rgba(120, 162, 208, 0.28);
+  --shadow-sm: 0 8px 24px rgba(62, 122, 184, 0.08);
+  --shadow-md: 0 18px 42px rgba(67, 127, 193, 0.12);
+  --shadow-lg: 0 28px 60px rgba(66, 123, 186, 0.16);
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
 
   // 代码相关的颜色和字体
   --code-font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
-  --code-lang-text: #000000;
-  --code-block-bg: #fcfcfc;
-  --code-header-bg: #f3f4f6;
-  --code-border: #ebebeb;
-  --code-text: #383a42; /* 添加默认代码文本颜色 - 接近黑色 */
-  --code-header-button-hover-bg: #e5e6e8;
+  --code-lang-text: #23415f;
+  --code-block-bg: #f7fbff;
+  --code-header-bg: #eaf4ff;
+  --code-border: rgba(135, 173, 215, 0.22);
+  --code-text: #2f4966;
+  --code-header-button-hover-bg: #e2efff;
 }
-
-
 
 
