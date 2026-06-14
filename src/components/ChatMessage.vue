@@ -135,6 +135,12 @@ function handleTableCellInput(rowId: string, columnKey: string, event: Event) {
     row.cells[columnKey] = normalizeCellInput(nextValue, row.cells[columnKey] ?? '')
 }
 
+/** 刷新后 blob: 会失效；仅 data:/http(s) 可安全用于 img */
+function isPersistableImageUrl(url: string | undefined): boolean {
+    if (!url) return false
+    return url.startsWith('data:') || /^https?:\/\//.test(url)
+}
+
 function maxCitationIndex(sources: unknown[] | undefined): number {
     if (!sources?.length) return 0
     return Math.max(
@@ -347,8 +353,11 @@ const handleCopy = async () => {
         <div class="files-container" v-if="message.files && message.files.length > 0">
             <div class="files-item" v-for="file in message.files" :key="file.url">
                 <!-- 图片预览 -->
-                <div class="image-preview" v-if="file.type === 'image'">
+                <div class="image-preview" v-if="file.type === 'image' && isPersistableImageUrl(file.url)">
                     <img :src="file.url" :alt="file.name">
+                </div>
+                <div class="image-preview image-preview--expired" v-else-if="file.type === 'image'">
+                    <span class="image-expired-hint">图片预览已失效（请重新发送）</span>
                 </div>
                 <!-- 文件预览 -->
                 <div  class="file-preview" v-else>

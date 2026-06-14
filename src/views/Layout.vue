@@ -196,6 +196,29 @@ const listContainer = ref<HTMLElement | null>(null)
 // 虚拟列表实例
 const scrollerRef = ref<any>(null)
 
+/** 距底部多少 px 内视为「在底部」，才跟随新消息自动滚动 */
+const SCROLL_BOTTOM_THRESHOLD = 80
+/** 用户是否在底部附近（主动上滑查看历史时为 false） */
+const shouldAutoScroll = ref(true)
+
+function getScrollElement(): HTMLElement | null {
+    if (useVirtualScroll.value) {
+        return (scrollerRef.value?.$el as HTMLElement) ?? null
+    }
+    return listContainer.value
+}
+
+function isNearBottom(): boolean {
+    const el = getScrollElement()
+    if (!el) return shouldAutoScroll.value
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    return distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD
+}
+
+function onMessagesScroll() {
+    shouldAutoScroll.value = isNearBottom()
+}
+
 function scrollToBottom() {
     nextTick(() => {
         if (useVirtualScroll.value) {
@@ -206,13 +229,28 @@ function scrollToBottom() {
     })
 }
 
-// 监听消息变化，滚动到底部
-watch(currentMessages, scrollToBottom, { deep: true })
+function scrollToBottomIfNeeded() {
+    if (shouldAutoScroll.value) {
+        scrollToBottom()
+    }
+}
 
-// 流式输出结束时（isLoading: true → false），可能发生 v-for → DynamicScroller 切换
-// 新组件默认从顶部开始，需要重新滚到底部
+// 监听消息变化：仅当用户本来在底部附近时才跟随滚动
+watch(currentMessages, scrollToBottomIfNeeded, { deep: true })
+
+// 流式结束或普通/虚拟列表切换时，新容器默认在顶部，需在「仍贴底」时恢复到底部
 watch(isLoading, (loading) => {
-    if (!loading) scrollToBottom()
+    if (!loading) {
+        nextTick(() => {
+            if (shouldAutoScroll.value) scrollToBottom()
+        })
+    }
+})
+
+watch(useVirtualScroll, () => {
+    nextTick(() => {
+        if (shouldAutoScroll.value) scrollToBottom()
+    })
 })
 
 onMounted(() => {
@@ -304,7 +342,7 @@ onMounted(() => {
             </div>
 
             <!-- 路径 2：有消息，普通渲染（消息数 < 阈值 或 正在流式输出） -->
-            <div v-else-if="!useVirtualScroll" class="messages-container" ref="listContainer">
+            <div v-else-if="!useVirtualScroll" class="messages-container" ref="listContainer" @scroll="onMessagesScroll">
                 <!-- v-memo：只有这三个值变化时才重渲染该条目，流式时非末尾消息直接跳过 -->
                 <ChatMessage
                     v-for="msg in currentMessages"
@@ -325,6 +363,7 @@ onMounted(() => {
                 key-field="id"
                 class="messages-container"
                 style="padding: 0.6rem"
+                @scroll="onMessagesScroll"
             >
                 <template #default="{ item, active }">
                     <DynamicScrollerItem

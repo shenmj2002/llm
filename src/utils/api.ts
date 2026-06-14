@@ -49,8 +49,8 @@ export const createChatCompletion = async (messages:sendMessage[]) => {
         //检查是否错误
         if(!response.ok){
             const errorBody = await response.json().catch(() => null)
-            const detail = errorBody?.detail || errorBody?.error || ''
-            throw new Error(detail ? `HTTP error! status: ${response.status} - ${detail}` : "HTTP error! status: " + response.status)
+            const detail = errorBody?.detail || errorBody?.error || errorBody?.message || ''
+            throw new Error(detail || `HTTP error! status: ${response.status}`)
         }
         //判断是否需要流式响应
         if (settingStore.settings.stream){
